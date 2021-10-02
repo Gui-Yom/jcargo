@@ -7,3 +7,7 @@ edition = "2018"
 
 [dependencies]
 walkdir = "2"
+structopt = { version = "0.3", features = ["color"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.5"

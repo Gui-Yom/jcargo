@@ -1,0 +1,13 @@
+name = "testproject"
+version = "0.1.0"
+
+[[entrypoints]]
+class = "Main"
+
+[[entrypoints]]
+name = "Other"
+class = "OtherMain"
+
+[dependencies]
+"commons-collections" = "2.0"
+"log4j" = { version = "2.14.0" }

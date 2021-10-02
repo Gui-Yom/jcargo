@@ -1,4 +1,4 @@
 /target
-/buildjava
+/testproject/target
 /.idea
 *.exe
