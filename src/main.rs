@@ -8,7 +8,7 @@ use structopt::StructOpt;
 use walkdir::WalkDir;
 
 use crate::backend::Backend;
-use crate::module::{Module, ModuleConfig};
+use crate::module::Module;
 
 mod backend;
 mod javac_parser;
@@ -34,54 +34,25 @@ enum Task {
     Run { entrypoint: Option<String> },
 }
 
-fn main() {
-    let opts = Opts::from_args();
-    println!("{:?}", opts);
+#[derive(Debug)]
+struct Env {
+    pub backend: Backend,
+}
 
-    let module = Module::load(&opts.working_dir);
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+async fn main() {
+    let opts = Opts::from_args();
+    dbg!(&opts);
+
+    let module = Module::load(&opts.working_dir).await;
     dbg!(&module);
 
-    println!(
-        "   Compiling {} v{} <path>",
-        module.config.name, module.config.version
-    );
-
-    let backend = opts.backend;
-    let build = || {
-        let instant = Instant::now();
-        module.compile(backend);
-
-        println!(
-            "   Finished build. (took {} ms)",
-            instant.elapsed().as_millis()
-        );
-        println!();
-    };
-
-    let run = |entrypoint: Option<String>| {
-        println!("   Running 'Main'");
-        let instant = Instant::now();
-
-        module.run(entrypoint);
-
-        println!(
-            "   Execution finished. (took {} ms)",
-            instant.elapsed().as_millis()
+    module
+        .execute_task(
+            opts.cmd,
+            Env {
+                backend: opts.backend,
+            },
         )
-    };
-
-    match opts.cmd {
-        Task::Build => {
-            build();
-        }
-
-        Task::Jar => {
-            build();
-        }
-
-        Task::Run { entrypoint } => {
-            build();
-            run(entrypoint);
-        }
-    }
+        .await;
 }
