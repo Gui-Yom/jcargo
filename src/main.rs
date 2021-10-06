@@ -1,17 +1,16 @@
 use std::path::PathBuf;
-use std::process;
-use std::process::Stdio;
-use std::time::Instant;
-use std::{env, fs};
+use std::sync::Arc;
 
 use structopt::StructOpt;
-use walkdir::WalkDir;
 
-use crate::backend::Backend;
+use crate::backend::{CompilationBackend, PackageBackend, Runtime};
+use crate::dependency::MavenRepo;
 use crate::module::Module;
 
 mod backend;
+mod dependency;
 mod javac_parser;
+mod manifest;
 mod module;
 
 #[derive(StructOpt, Debug)]
@@ -21,22 +20,30 @@ struct Opts {
     debug: bool,
     #[structopt(short, long = "--working-dir", default_value = ".")]
     working_dir: PathBuf,
-    #[structopt(short, long, default_value = "javacnative")]
-    backend: Backend,
+    #[structopt(short, long, default_value = "native")]
+    backend: CompilationBackend,
     #[structopt(subcommand)]
     cmd: Task,
 }
 
 #[derive(StructOpt, Debug)]
-enum Task {
+pub enum Task {
+    /// Check project consistency (manifest, dependencies)
+    Check,
+    /// Build project classes
     Build,
+    /// Create a jar of the built classes
     Jar,
+    /// Run a main class
     Run { entrypoint: Option<String> },
 }
 
 #[derive(Debug)]
-struct Env {
-    pub backend: Backend,
+pub struct Env {
+    pub repos: Vec<Arc<MavenRepo>>,
+    pub comp_backend: CompilationBackend,
+    pub runtime: Runtime,
+    pub package_backend: PackageBackend,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -44,15 +51,18 @@ async fn main() {
     let opts = Opts::from_args();
     dbg!(&opts);
 
-    let module = Module::load(&opts.working_dir).await;
+    let env = Env {
+        repos: vec![Arc::new(MavenRepo {
+            name: "maven-central".to_string(),
+            url: "https://repo.maven.apache.org/maven2".to_string(),
+        })],
+        comp_backend: opts.backend,
+        runtime: Runtime::Java,
+        package_backend: PackageBackend::NativeJdkTools,
+    };
+
+    let module = Module::load(&opts.working_dir, &env).await;
     dbg!(&module);
 
-    module
-        .execute_task(
-            opts.cmd,
-            Env {
-                backend: opts.backend,
-            },
-        )
-        .await;
+    module.execute_task(opts.cmd, &env).await;
 }

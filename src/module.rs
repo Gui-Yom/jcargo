@@ -1,58 +1,63 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::Deserialize;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, process};
 use walkdir::WalkDir;
 
-use manifest::{CompleteDependencyDef, EntrypointDef, ModuleManifest};
-
-use crate::backend::Backend;
+use crate::backend::CompilationBackend;
+use crate::dependency::Dependency;
+use crate::manifest::{CompleteDependencyDef, EntrypointDef, ModuleManifest};
 use crate::{Env, Task};
-
-pub mod manifest;
 
 #[derive(Debug)]
 pub struct Module {
     pub dir: PathBuf,
-    pub name: String,
+    pub group: String,
+    pub artifact: String,
     pub version: String,
+    pub base_package: String,
     pub entrypoints: Vec<EntrypointDef>,
-    pub dependencies: Vec<CompleteDependencyDef>,
+    pub dependencies: Vec<Dependency>,
 }
 
 impl Module {
-    pub async fn load(path: &Path) -> Self {
+    pub async fn load(path: &Path, env: &Env) -> Self {
         let document = fs::read_to_string(path.join("jcargo.toml"))
             .await
             .expect("Can't read jcargo.toml file");
-        let manifest = ModuleManifest::new(&document);
+        let manifest = ModuleManifest::parse(&document, None);
         Self {
             dir: path.to_path_buf(),
-            name: manifest.name,
+            group: manifest.group.unwrap(),
+            artifact: manifest.artifact,
             version: manifest.version,
+            base_package: manifest.base_package,
             entrypoints: manifest.entrypoints,
             dependencies: manifest
                 .dependencies
                 .into_iter()
-                .map(|it| it.into())
+                .map(|it| Dependency::from_def(Into::<CompleteDependencyDef>::into(it), env))
                 .collect(),
         }
     }
 
     #[async_recursion::async_recursion]
-    pub async fn execute_task(&self, task: Task, env: Env) {
+    pub async fn execute_task(&self, task: Task, env: &Env) {
         match task {
+            Task::Check => {
+                println!("   Verifying dependencies ...");
+                self.check();
+                println!("   Done !")
+            }
             Task::Build => {
-                println!("   Compiling {} v{} <path>", self.name, self.version);
+                self.execute_task(Task::Check, env).await;
+                println!("   Compiling {} v{} <path>", self.artifact, self.version);
 
                 let instant = Instant::now();
-                self.build(env.backend).await;
+                self.build(env.comp_backend).await;
 
                 println!(
                     "   Finished build. (took {} ms)",
@@ -80,10 +85,12 @@ impl Module {
         }
     }
 
-    pub async fn build(&self, backend: Backend) {
-        self.download_dependencies().await;
+    pub async fn check(&self) {
+        self.setup_dependencies().await;
+    }
 
-        let mut cmd: process::Command = backend.command().into();
+    pub async fn build(&self, backend: CompilationBackend) {
+        let mut cmd: process::Command = backend.command();
         let output_dir = format!("{}/target/classes", self.dir.display());
         cmd.args([
             "-source",
@@ -96,15 +103,24 @@ impl Module {
             "-d",
             &output_dir,
             "-cp",
-            &output_dir,
         ]);
+
+        // Collect dependencies include paths
+        let mut cp: Vec<String> = self
+            .dependencies
+            .iter()
+            .map(|it| format!("{}/{}", self.dir.display(), it.include_arg()))
+            .collect();
+        cp.push(output_dir);
+        let cp = cp.join(";");
+        cmd.arg(&cp);
 
         self.collect_source_files().for_each(|it| {
             cmd.arg(it);
         });
 
         cmd.env(
-            "JAVAC_HOME",
+            "JDKTOOLS_HOME",
             "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
         )
         .stdout(Stdio::inherit())
@@ -127,7 +143,7 @@ impl Module {
     pub async fn run(&self, entrypoint_name: Option<String>) {
         let output_dir = format!("{}/target/classes", self.dir.display());
 
-        let mut class = None;
+        let class;
         match entrypoint_name {
             Some(name) => class = self.find_entrypoint(&name).map(|it| &it.class),
             None => {
@@ -156,7 +172,7 @@ impl Module {
             .unwrap();
     }
 
-    fn generate_jar_manifest(&self, entrypoint_name: Option<String>) {
+    async fn generate_jar_manifest(&self, entrypoint_name: Option<String>) {
         let manifest = self.dir.join("target/classes/META-INF/MANIFEST.MF");
 
         fs::write(
@@ -165,7 +181,8 @@ impl Module {
         Manifest-Version: 1.0
         Main-Class: Main
         ",
-        );
+        )
+        .await;
     }
 
     /// Find an entrypoint with the given name.
@@ -182,47 +199,54 @@ impl Module {
         self.entrypoints.first()
     }
 
-    async fn download_dependencies(&self) {
-        //https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j-api/2.14.1/
-
+    async fn setup_dependencies(&self) {
         let client_ = Arc::new(reqwest::Client::new());
 
-        let mut handles = Vec::new();
+        println!("   Checking dependencies");
+
+        let mut handles = Vec::with_capacity(self.dependencies.len());
         for dep_ in self.dependencies.iter() {
+            // Manually clone
             let dep = dep_.clone();
-            let client = client_.clone();
+            let client = Arc::clone(&client_);
+
             handles.push(tokio::spawn(async move {
-                // TODO download dependencies to a known place
-                // TODO verify file hash for update
+                match dep {
+                    Dependency::Repo(repodep) => {
+                        // TODO download dependencies to a known place
+                        // TODO verify file hash for update
 
-                if PathBuf::from(dep.get_file()).exists() {
-                    return;
+                        if PathBuf::from(repodep.get_file()).exists() {
+                            println!("Dependency {} OK", repodep);
+                            return;
+                        }
+
+                        println!("Downloading {} from {}", repodep, repodep.repo.name);
+
+                        let mut res = client.get(&repodep.download_url()).send().await.unwrap();
+
+                        let file = fs::OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(repodep.get_file())
+                            .await
+                            .expect("Can't create/open file");
+                        let mut buf_file = BufWriter::new(file);
+                        while let Some(chunk) = res.chunk().await.expect("Can't get a chunk") {
+                            buf_file.write(&chunk).await.unwrap();
+                        }
+                        buf_file.flush().await.expect("Can't write file to disk");
+                        println!("Downloaded {}", repodep);
+                    }
+                    _ => {
+                        todo!()
+                    }
                 }
-
-                let url = format!(
-                    "https://repo.maven.apache.org/maven2/{}/{}",
-                    dep.get_path(),
-                    dep.get_file()
-                );
-                let mut res = client.get(&url).send().await.unwrap();
-
-                let file = fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(dep.get_file())
-                    .await
-                    .expect("Can't create/open file");
-                let mut buf_file = BufWriter::new(file);
-                while let Some(chunk) = res.chunk().await.expect("Can't get a chunk") {
-                    buf_file.write(&chunk).await.unwrap();
-                }
-                buf_file.flush().await.expect("Can't write file to disk");
-                println!("Downloaded {}", dep);
             }))
         }
         for x in handles {
-            x.await.expect("Error when waiting for download");
+            x.await.expect("Error when waiting for dependency setup");
         }
     }
 }

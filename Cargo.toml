@@ -8,6 +8,7 @@ resolver = "2"
 
 [dependencies]
 async-recursion = "0.3"
+quick-xml = { version = "0.22", features = ["serialize"] }
 regex = "1"
 reqwest = { version = "0.11", features = ["stream"] }
 semver = "1"
