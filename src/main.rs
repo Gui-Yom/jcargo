@@ -4,11 +4,11 @@ use std::sync::Arc;
 use structopt::StructOpt;
 
 use crate::backend::{CompilationBackend, PackageBackend, Runtime};
-use crate::dependency::MavenRepo;
+use crate::dependencies::MavenRepo;
 use crate::module::Module;
 
 mod backend;
-mod dependency;
+mod dependencies;
 mod javac_parser;
 mod manifest;
 mod module;
@@ -36,6 +36,8 @@ pub enum Task {
     Jar,
     /// Run a main class
     Run { entrypoint: Option<String> },
+    /// Delete all generated directories
+    Clean,
 }
 
 #[derive(Debug)]

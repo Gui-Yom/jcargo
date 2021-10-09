@@ -3,8 +3,73 @@ use std::sync::Arc;
 
 use semver::Version;
 
-use crate::manifest::CompleteDependencyDef;
+use crate::manifest::{CompleteDependencyDef, DependenciesDef};
 use crate::Env;
+
+#[derive(Debug, Clone)]
+pub struct Dependencies {
+    pub compile: Vec<Dependency>,
+    pub runtime: Vec<Dependency>,
+    pub compile_runtime: Vec<Dependency>,
+    pub transitive: Vec<Dependency>,
+}
+
+impl Dependencies {
+    pub fn from_def(dd: DependenciesDef, env: &Env) -> Self {
+        Self {
+            compile: dd
+                .compile
+                .into_iter()
+                .map(|it| Dependency::from_def(it.into(), env))
+                .collect(),
+            runtime: dd
+                .runtime
+                .into_iter()
+                .map(|it| Dependency::from_def(it.into(), env))
+                .collect(),
+            compile_runtime: dd
+                .compile_runtime
+                .into_iter()
+                .map(|it| Dependency::from_def(it.into(), env))
+                .collect(),
+            transitive: dd
+                .transitive
+                .into_iter()
+                .map(|it| Dependency::from_def(it.into(), env))
+                .collect(),
+        }
+    }
+
+    /// Total number of dependencies, all scopes
+    pub fn len(&self) -> usize {
+        self.compile.len() + self.runtime.len() + self.compile_runtime.len() + self.transitive.len()
+    }
+
+    /// Returns an iterator over all dependencies
+    pub fn iter(&self) -> impl Iterator<Item = &Dependency> {
+        self.compile
+            .iter()
+            .chain(self.runtime.iter())
+            .chain(self.compile_runtime.iter())
+            .chain(self.transitive.iter())
+    }
+
+    /// Returns an Iterator over all dependencies that should be available at compile time
+    pub fn iter_compile(&self) -> impl Iterator<Item = &Dependency> {
+        self.compile
+            .iter()
+            .chain(self.compile_runtime.iter())
+            .chain(self.transitive.iter())
+    }
+
+    /// Returns an Iterator over all dependencies that should be available at runtime
+    pub fn iter_runtime(&self) -> impl Iterator<Item = &Dependency> {
+        self.compile
+            .iter()
+            .chain(self.compile_runtime.iter())
+            .chain(self.transitive.iter())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Dependency {
@@ -29,7 +94,7 @@ impl Dependency {
         })
     }
 
-    pub fn include_arg(&self) -> String {
+    pub fn classpath(&self) -> String {
         match self {
             Dependency::Repo(repodep) => repodep.get_file(),
             _ => todo!(),

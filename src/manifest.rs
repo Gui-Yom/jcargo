@@ -6,15 +6,17 @@ pub struct ModuleManifest {
     // Group can be inferred from the root manifest
     pub group: Option<String>,
     pub artifact: String,
-    #[serde(default)]
     pub version: String,
+    #[serde(default)]
     pub base_package: String,
+    #[serde(flatten)]
+    pub extra_info: ExtraInfo,
     // May be a library
     #[serde(default)]
     pub entrypoints: Vec<EntrypointDef>,
     // No dependencies is ok
     #[serde(default)]
-    pub dependencies: Vec<DependencyDef>,
+    pub dependencies: DependenciesDef,
 }
 
 impl ModuleManifest {
@@ -35,6 +37,14 @@ impl ModuleManifest {
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub struct ExtraInfo {
+    #[serde(default)]
+    pub authors: Vec<String>,
+    #[serde(default)]
+    pub license: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EntrypointDef {
     /// Name used when invoking the run task
@@ -51,6 +61,18 @@ impl EntrypointDef {
         }
         return true;
     }
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct DependenciesDef {
+    #[serde(default)]
+    pub compile: Vec<DependencyDef>,
+    #[serde(default)]
+    pub runtime: Vec<DependencyDef>,
+    #[serde(default, rename = "compileRuntime")]
+    pub compile_runtime: Vec<DependencyDef>,
+    #[serde(default)]
+    pub transitive: Vec<DependencyDef>,
 }
 
 #[derive(Debug, Deserialize)]

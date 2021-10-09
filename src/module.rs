@@ -1,3 +1,4 @@
+use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -7,8 +8,8 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, process};
 use walkdir::WalkDir;
 
-use crate::backend::CompilationBackend;
-use crate::dependency::Dependency;
+use crate::backend::{CompilationBackend, Runtime};
+use crate::dependencies::{Dependencies, Dependency};
 use crate::manifest::{CompleteDependencyDef, EntrypointDef, ModuleManifest};
 use crate::{Env, Task};
 
@@ -20,7 +21,7 @@ pub struct Module {
     pub version: String,
     pub base_package: String,
     pub entrypoints: Vec<EntrypointDef>,
-    pub dependencies: Vec<Dependency>,
+    pub dependencies: Dependencies,
 }
 
 impl Module {
@@ -36,11 +37,7 @@ impl Module {
             version: manifest.version,
             base_package: manifest.base_package,
             entrypoints: manifest.entrypoints,
-            dependencies: manifest
-                .dependencies
-                .into_iter()
-                .map(|it| Dependency::from_def(Into::<CompleteDependencyDef>::into(it), env))
-                .collect(),
+            dependencies: Dependencies::from_def(manifest.dependencies, env),
         }
     }
 
@@ -48,8 +45,8 @@ impl Module {
     pub async fn execute_task(&self, task: Task, env: &Env) {
         match task {
             Task::Check => {
-                println!("   Verifying dependencies ...");
-                self.check();
+                println!("   Checking dependencies");
+                self.check().await;
                 println!("   Done !")
             }
             Task::Build => {
@@ -63,7 +60,6 @@ impl Module {
                     "   Finished build. (took {} ms)",
                     instant.elapsed().as_millis()
                 );
-                println!();
             }
 
             Task::Jar => {
@@ -82,11 +78,12 @@ impl Module {
                     instant.elapsed().as_millis()
                 );
             }
+            Task::Clean => {}
         }
     }
 
     pub async fn check(&self) {
-        self.setup_dependencies().await;
+        self.setup_all_dependencies().await;
     }
 
     pub async fn build(&self, backend: CompilationBackend) {
@@ -106,13 +103,13 @@ impl Module {
         ]);
 
         // Collect dependencies include paths
-        let mut cp: Vec<String> = self
+        let cp = self
             .dependencies
-            .iter()
-            .map(|it| format!("{}/{}", self.dir.display(), it.include_arg()))
-            .collect();
-        cp.push(output_dir);
-        let cp = cp.join(";");
+            .iter_compile()
+            .map(|it| format!("{}/{}", self.dir.display(), it.classpath()))
+            .chain(iter::once(output_dir))
+            .reduce(|a, b| format!("{};{}", a, b))
+            .unwrap();
         cmd.arg(&cp);
 
         self.collect_source_files().for_each(|it| {
@@ -156,18 +153,30 @@ impl Module {
             return;
         }
 
-        process::Command::new("java")
-            .args([
-                "-Xshare:on",
-                "-XX:TieredStopAtLevel=1",
-                "-XX:+UseSerialGC",
-                "-cp",
-                &output_dir,
-                class.unwrap(),
-            ])
+        let mut cmd = Runtime::Java.command();
+        cmd.args([
+            "-Xshare:on",
+            "-XX:TieredStopAtLevel=1",
+            "-XX:+UseSerialGC",
+            "-cp",
+        ]);
+
+        // Collect dependencies include paths
+        let cp = self
+            .dependencies
+            .iter_runtime()
+            .map(|it| format!("{}/{}", self.dir.display(), it.classpath()))
+            .chain(iter::once(output_dir))
+            .reduce(|a, b| format!("{};{}", a, b))
+            .unwrap();
+        cmd.arg(&cp);
+
+        cmd.arg(class.unwrap())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
-            .output()
+            .spawn()
+            .unwrap()
+            .wait_with_output()
             .await
             .unwrap();
     }
@@ -199,24 +208,26 @@ impl Module {
         self.entrypoints.first()
     }
 
-    async fn setup_dependencies(&self) {
+    /// Setup all dependencies from any scope
+    async fn setup_all_dependencies(&self) {
         let client_ = Arc::new(reqwest::Client::new());
-
-        println!("   Checking dependencies");
 
         let mut handles = Vec::with_capacity(self.dependencies.len());
         for dep_ in self.dependencies.iter() {
             // Manually clone
             let dep = dep_.clone();
             let client = Arc::clone(&client_);
+            let dir = self.dir.clone();
 
-            handles.push(tokio::spawn(async move {
+            let task = tokio::spawn(async move {
                 match dep {
                     Dependency::Repo(repodep) => {
                         // TODO download dependencies to a known place
                         // TODO verify file hash for update
 
-                        if PathBuf::from(repodep.get_file()).exists() {
+                        let file_path = dir.join(&repodep.get_file());
+
+                        if file_path.exists() {
                             println!("Dependency {} OK", repodep);
                             return;
                         }
@@ -229,7 +240,7 @@ impl Module {
                             .write(true)
                             .create(true)
                             .truncate(true)
-                            .open(repodep.get_file())
+                            .open(&file_path)
                             .await
                             .expect("Can't create/open file");
                         let mut buf_file = BufWriter::new(file);
@@ -243,7 +254,8 @@ impl Module {
                         todo!()
                     }
                 }
-            }))
+            });
+            handles.push(task);
         }
         for x in handles {
             x.await.expect("Error when waiting for dependency setup");
