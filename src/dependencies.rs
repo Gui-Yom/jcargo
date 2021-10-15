@@ -64,7 +64,7 @@ impl Dependencies {
 
     /// Returns an Iterator over all dependencies that should be available at runtime
     pub fn iter_runtime(&self) -> impl Iterator<Item = &Dependency> {
-        self.compile
+        self.runtime
             .iter()
             .chain(self.compile_runtime.iter())
             .chain(self.transitive.iter())
@@ -86,17 +86,18 @@ pub enum Dependency {
 
 impl Dependency {
     pub fn from_def(dd: CompleteDependencyDef, env: &Env) -> Self {
+        let first = dd.version.comparators.first().unwrap();
         Self::Repo(RepoDependency {
             group: dd.group,
             artifact: dd.artifact,
-            version: Version::parse(&dd.version).unwrap(),
+            version: Version::new(first.major, first.minor.unwrap(), first.patch.unwrap()),
             repo: Arc::clone(&env.repos[0]),
         })
     }
 
     pub fn classpath(&self) -> String {
         match self {
-            Dependency::Repo(repodep) => repodep.get_file(),
+            Dependency::Repo(repodep) => format!("libs/{}", repodep.get_file()),
             _ => todo!(),
         }
     }

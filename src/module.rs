@@ -111,6 +111,7 @@ impl Module {
             .reduce(|a, b| format!("{};{}", a, b))
             .unwrap();
         cmd.arg(&cp);
+        println!("compile classpath: {}", &cp);
 
         self.collect_source_files().for_each(|it| {
             cmd.arg(it);
@@ -171,6 +172,8 @@ impl Module {
             .unwrap();
         cmd.arg(&cp);
 
+        println!("runtime classpath: {}", &cp);
+
         cmd.arg(class.unwrap())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -217,7 +220,8 @@ impl Module {
             // Manually clone
             let dep = dep_.clone();
             let client = Arc::clone(&client_);
-            let dir = self.dir.clone();
+            let dir = self.dir.join("libs");
+            fs::create_dir_all(&dir).await;
 
             let task = tokio::spawn(async move {
                 match dep {
@@ -228,11 +232,11 @@ impl Module {
                         let file_path = dir.join(&repodep.get_file());
 
                         if file_path.exists() {
-                            println!("Dependency {} OK", repodep);
+                            println!("Dependency '{}' OK", repodep);
                             return;
                         }
 
-                        println!("Downloading {} from {}", repodep, repodep.repo.name);
+                        println!("Downloading '{}' from {}", repodep, repodep.repo.name);
 
                         let mut res = client.get(&repodep.download_url()).send().await.unwrap();
 

@@ -1,3 +1,4 @@
+use semver::VersionReq;
 use serde::Deserialize;
 
 /// Root of the TOML document
@@ -86,7 +87,7 @@ pub enum DependencyDef {
 pub struct CompleteDependencyDef {
     pub group: String,
     pub artifact: String,
-    pub version: String,
+    pub version: VersionReq,
 }
 
 impl From<DependencyDef> for CompleteDependencyDef {
@@ -97,7 +98,7 @@ impl From<DependencyDef> for CompleteDependencyDef {
                 Self {
                     group: pieces.next().unwrap().to_string(),
                     artifact: pieces.next().unwrap().to_string(),
-                    version: pieces.next().unwrap().to_string(),
+                    version: VersionReq::parse(pieces.next().unwrap()).unwrap(),
                 }
             }
             DependencyDef::CompleteNotation(complete) => complete,
