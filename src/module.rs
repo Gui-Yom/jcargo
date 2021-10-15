@@ -79,6 +79,7 @@ impl Module {
                 );
             }
             Task::Clean => {}
+            _ => {}
         }
     }
 

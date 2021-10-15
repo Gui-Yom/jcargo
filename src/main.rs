@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use structopt::StructOpt;
+use tokio::io::{AsyncWriteExt, BufWriter};
 
 use crate::backend::{CompilationBackend, PackageBackend, Runtime};
 use crate::dependencies::MavenRepo;
@@ -23,11 +24,13 @@ struct Opts {
     #[structopt(short, long, default_value = "native")]
     backend: CompilationBackend,
     #[structopt(subcommand)]
-    cmd: Task,
+    task: Task,
 }
 
 #[derive(StructOpt, Debug)]
 pub enum Task {
+    /// Init a new project in the current directory
+    Init { group: String, artifact: String },
     /// Check project consistency (manifest, dependencies)
     Check,
     /// Build project classes
@@ -63,8 +66,39 @@ async fn main() {
         package_backend: PackageBackend::NativeJdkTools,
     };
 
-    let module = Module::load(&opts.working_dir, &env).await;
-    dbg!(&module);
+    if let Task::Init { group, artifact } = &opts.task {
+        println!("Init '{}:{}' in the current directory", group, artifact);
+        let manifest_path = PathBuf::from("jcargo.toml");
+        if manifest_path.exists() {
+            println!("Error: There is already a manifest in the current directory.");
+            return;
+        }
+        let file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&manifest_path)
+            .await
+            .unwrap();
 
-    module.execute_task(opts.cmd, &env).await;
+        let mut buf = BufWriter::new(file);
+        buf.write(
+            format!(
+                r#"
+        group = "{}"
+        artifact = "{}"
+        version = "0.1.0"
+        "#,
+                group, artifact
+            )
+            .as_ref(),
+        )
+        .await
+        .unwrap();
+        buf.flush().await;
+    } else {
+        let module = Module::load(&opts.working_dir, &env).await;
+        dbg!(&module);
+
+        module.execute_task(opts.task, &env).await;
+    }
 }
