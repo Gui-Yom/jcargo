@@ -8,9 +8,9 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, process};
 use walkdir::WalkDir;
 
-use crate::backend::{CompilationBackend, Runtime};
+use crate::backend::{CompilationBackend, DocumentationBackend, PackageBackend, Runtime};
 use crate::dependencies::{Dependencies, Dependency};
-use crate::manifest::{CompleteDependencyDef, EntrypointDef, ModuleManifest};
+use crate::manifest::{EntrypointDef, ModuleManifest};
 use crate::{Env, Task};
 
 #[derive(Debug)]
@@ -61,11 +61,6 @@ impl Module {
                     instant.elapsed().as_millis()
                 );
             }
-
-            Task::Jar => {
-                self.execute_task(Task::Build, env).await;
-            }
-
             Task::Run { entrypoint } => {
                 self.execute_task(Task::Build, env).await;
                 println!("   Running 'Main'");
@@ -75,6 +70,42 @@ impl Module {
 
                 println!(
                     "   Execution finished. (took {} ms)",
+                    instant.elapsed().as_millis()
+                );
+            }
+            Task::Doc => {
+                println!("   Building documentation");
+                let instant = Instant::now();
+
+                self.build_doc(DocumentationBackend::JdkJavadoc).await;
+
+                println!(
+                    "   Finished build. (took {} ms)",
+                    instant.elapsed().as_millis()
+                );
+            }
+            Task::Package {
+                sources,
+                docs,
+                entrypoint,
+            } => {
+                self.execute_task(Task::Build, env).await;
+                if docs {
+                    self.execute_task(Task::Doc, env).await;
+                }
+
+                println!(
+                    "   Packaging jar{}{} ...",
+                    if sources { " +sources" } else { "" },
+                    if docs { " +docs" } else { "" }
+                );
+                let instant = Instant::now();
+
+                self.package(env.package_backend, sources, docs, entrypoint)
+                    .await;
+
+                println!(
+                    "   Packaging finished. (took {} ms)",
                     instant.elapsed().as_millis()
                 );
             }
@@ -114,7 +145,7 @@ impl Module {
         cmd.arg(&cp);
         println!("compile classpath: {}", &cp);
 
-        self.collect_source_files().for_each(|it| {
+        Self::collect_files(self.dir.join("src")).for_each(|it| {
             cmd.arg(it);
         });
 
@@ -129,14 +160,6 @@ impl Module {
         .wait_with_output()
         .await
         .unwrap();
-    }
-
-    fn collect_source_files(&self) -> impl Iterator<Item = PathBuf> {
-        WalkDir::new(self.dir.join("src"))
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|it| it.file_type().is_file())
-            .map(|it| it.path().to_path_buf())
     }
 
     pub async fn run(&self, entrypoint_name: Option<String>) {
@@ -185,6 +208,175 @@ impl Module {
             .unwrap();
     }
 
+    pub async fn build_doc(&self, backend: DocumentationBackend) {
+        let mut cmd: process::Command = backend.command();
+
+        tokio::fs::create_dir_all(self.dir.join("target/docs"))
+            .await
+            .unwrap();
+
+        cmd.arg("-d")
+            .arg(&format!("{}/target/docs", self.dir.display()))
+            .arg("-cp");
+
+        // Collect dependencies include paths
+        let cp = self
+            .dependencies
+            .iter_compile()
+            .map(|it| format!("{}/{}", self.dir.display(), it.classpath()))
+            .reduce(|a, b| format!("{};{}", a, b))
+            .unwrap();
+        cmd.arg(&cp);
+        println!("compile classpath: {}", &cp);
+
+        Self::collect_files(self.dir.join("src")).for_each(|it| {
+            cmd.arg(it);
+        });
+
+        cmd.env(
+            "JDKTOOLS_HOME",
+            "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
+        )
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .await
+        .unwrap();
+    }
+
+    pub async fn package(
+        &self,
+        backend: PackageBackend,
+        sources: bool,
+        docs: bool,
+        entrypoint: Option<String>,
+    ) {
+        let base_dir = Arc::new(self.dir.clone());
+        let artifact_dir = self.dir.join("target/artifacts");
+        let artifact_base_name = Arc::new(format!(
+            "{}/{}-{}",
+            artifact_dir.display(),
+            self.artifact,
+            self.version
+        ));
+
+        let entrypoint_class = entrypoint
+            .as_ref()
+            .map(|it| self.find_entrypoint(it))
+            .flatten()
+            .map(|it| it.class.clone());
+
+        tokio::fs::create_dir_all(artifact_dir).await.unwrap();
+
+        let base_dir2 = base_dir.clone();
+        let artifact_base_name2 = artifact_base_name.clone();
+        let mut handles = Vec::new();
+        handles.push(tokio::spawn(async move {
+            let mut cmd: process::Command = backend.command();
+
+            // Create mode
+            cmd.arg("-c")
+                .arg("-f")
+                .arg(&format!("{}.jar", artifact_base_name2));
+
+            if let Some(entrypoint) = entrypoint_class {
+                cmd.arg("-e").arg(&entrypoint);
+            }
+
+            Self::collect_files(base_dir2.join("target/classes"))
+                .chain(Self::collect_files(base_dir2.join("resources")))
+                .for_each(|it| {
+                    cmd.arg(it);
+                });
+
+            cmd.env(
+                "JDKTOOLS_HOME",
+                "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
+            )
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .await
+            .unwrap();
+        }));
+
+        if sources {
+            let base_dir2 = base_dir.clone();
+            let artifact_base_name2 = artifact_base_name.clone();
+            handles.push(tokio::spawn(async move {
+                let mut cmd: process::Command = backend.command();
+
+                // Create mode
+                cmd.arg("-c")
+                    .arg("-f")
+                    .arg(&format!("{}-sources.jar", artifact_base_name2));
+
+                Self::collect_files(base_dir2.join("src"))
+                    .chain(Self::collect_files(base_dir2.join("resources")))
+                    .for_each(|it| {
+                        cmd.arg(it);
+                    });
+
+                cmd.env(
+                    "JDKTOOLS_HOME",
+                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
+                )
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap()
+                .wait_with_output()
+                .await
+                .unwrap();
+            }));
+        }
+
+        if docs {
+            let base_dir2 = base_dir.clone();
+            let artifact_base_name2 = artifact_base_name.clone();
+            handles.push(tokio::spawn(async move {
+                let mut cmd: process::Command = backend.command();
+
+                // Create mode
+                cmd.arg("-c")
+                    .arg("-f")
+                    .arg(&format!("{}-docs.jar", artifact_base_name2));
+
+                Self::collect_files(base_dir2.join("docs")).for_each(|it| {
+                    cmd.arg(it);
+                });
+
+                cmd.env(
+                    "JDKTOOLS_HOME",
+                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
+                )
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap()
+                .wait_with_output()
+                .await
+                .unwrap();
+            }));
+        }
+
+        for x in handles {
+            x.await.unwrap();
+        }
+    }
+
+    fn collect_files<P: AsRef<Path>>(path: P) -> impl Iterator<Item = PathBuf> {
+        WalkDir::new(path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|it| it.file_type().is_file())
+            .map(|it| it.path().to_path_buf())
+    }
+
     async fn generate_jar_manifest(&self, entrypoint_name: Option<String>) {
         let manifest = self.dir.join("target/classes/META-INF/MANIFEST.MF");
 
@@ -195,7 +387,8 @@ impl Module {
         Main-Class: Main
         ",
         )
-        .await;
+        .await
+        .unwrap();
     }
 
     /// Find an entrypoint with the given name.
@@ -222,7 +415,7 @@ impl Module {
             let dep = dep_.clone();
             let client = Arc::clone(&client_);
             let dir = self.dir.join("libs");
-            fs::create_dir_all(&dir).await;
+            fs::create_dir_all(&dir).await.unwrap();
 
             let task = tokio::spawn(async move {
                 match dep {

@@ -1,10 +1,13 @@
 [package]
 name = "jcargo"
 version = "0.1.0"
-edition = "2018"
-resolver = "2"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.release]
+codegen-units = 4
+lto = "thin"
 
 [dependencies]
 async-recursion = "0.3"

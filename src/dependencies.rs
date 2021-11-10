@@ -143,7 +143,7 @@ impl Display for RepoDependency {
 }
 
 #[derive(Debug, Clone)]
-struct GitDependency {
+pub struct GitDependency {
     /// Repository url
     url: String,
     /// Repo branch or tag
@@ -157,11 +157,11 @@ struct GitDependency {
 }
 
 #[derive(Debug, Clone)]
-struct ProjectDependency {
+pub struct ProjectDependency {
     path: String,
 }
 
 #[derive(Debug, Clone)]
-struct ExternalDependency {
+pub struct ExternalDependency {
     path: String,
 }

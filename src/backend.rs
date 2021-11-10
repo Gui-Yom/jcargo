@@ -4,8 +4,8 @@ use tokio::process;
 
 #[derive(Debug, Copy, Clone)]
 pub enum CompilationBackend {
-    Javac,
-    NativeJdkTools,
+    JdkJavac,
+    NativeJavac,
 }
 
 impl FromStr for CompilationBackend {
@@ -13,8 +13,8 @@ impl FromStr for CompilationBackend {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "javac" => Ok(CompilationBackend::Javac),
-            "native" => Ok(CompilationBackend::NativeJdkTools),
+            "javac" => Ok(CompilationBackend::JdkJavac),
+            "native" => Ok(CompilationBackend::NativeJavac),
             other => Err(format!("Can't convert {} to a valid Backend", other)),
         }
     }
@@ -23,8 +23,8 @@ impl FromStr for CompilationBackend {
 impl CompilationBackend {
     pub fn command(&self) -> process::Command {
         match self {
-            CompilationBackend::Javac => process::Command::new("javac"),
-            CompilationBackend::NativeJdkTools => {
+            CompilationBackend::JdkJavac => process::Command::new("javac"),
+            CompilationBackend::NativeJavac => {
                 let mut cmd = process::Command::new("native-jdktools");
                 cmd.arg("javac");
                 cmd
@@ -33,7 +33,7 @@ impl CompilationBackend {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Runtime {
     Java,
 }
@@ -46,20 +46,42 @@ impl Runtime {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
+pub enum DocumentationBackend {
+    JdkJavadoc,
+    NativeJavadoc,
+}
+
+impl DocumentationBackend {
+    pub fn command(&self) -> process::Command {
+        match self {
+            DocumentationBackend::JdkJavadoc => {
+                let cmd = process::Command::new("javadoc");
+                cmd
+            }
+            DocumentationBackend::NativeJavadoc => {
+                let mut cmd = process::Command::new("native-jdktools");
+                cmd.arg("javadoc");
+                cmd
+            }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum PackageBackend {
-    Jar,
-    NativeJdkTools,
+    JdkJar,
+    NativeJar,
 }
 
 impl PackageBackend {
     pub fn command(&self) -> process::Command {
         match self {
-            PackageBackend::Jar => {
-                let mut cmd = process::Command::new("jar");
+            PackageBackend::JdkJar => {
+                let cmd = process::Command::new("jar");
                 cmd
             }
-            PackageBackend::NativeJdkTools => {
+            PackageBackend::NativeJar => {
                 let mut cmd = process::Command::new("native-jdktools");
                 cmd.arg("jar");
                 cmd

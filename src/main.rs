@@ -21,7 +21,7 @@ struct Opts {
     debug: bool,
     #[structopt(short, long = "--working-dir", default_value = ".")]
     working_dir: PathBuf,
-    #[structopt(short, long, default_value = "native")]
+    #[structopt(short, long, default_value = "javac")]
     backend: CompilationBackend,
     #[structopt(subcommand)]
     task: Task,
@@ -35,10 +35,20 @@ pub enum Task {
     Check,
     /// Build project classes
     Build,
-    /// Create a jar of the built classes
-    Jar,
     /// Run a main class
     Run { entrypoint: Option<String> },
+    /// Create javadoc
+    Doc,
+    /// Create a jar of the built classes
+    Package {
+        /// Create a sources jar
+        #[structopt(long = "sources")]
+        sources: bool,
+        /// Create a doc jar
+        #[structopt(long = "docs")]
+        docs: bool,
+        entrypoint: Option<String>,
+    },
     /// Delete all generated directories
     Clean,
 }
@@ -63,7 +73,7 @@ async fn main() {
         })],
         comp_backend: opts.backend,
         runtime: Runtime::Java,
-        package_backend: PackageBackend::NativeJdkTools,
+        package_backend: PackageBackend::JdkJar,
     };
 
     if let Task::Init { group, artifact } = &opts.task {
@@ -94,7 +104,7 @@ async fn main() {
         )
         .await
         .unwrap();
-        buf.flush().await;
+        buf.flush().await.unwrap();
     } else {
         let module = Module::load(&opts.working_dir, &env).await;
         dbg!(&module);
