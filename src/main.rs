@@ -7,12 +7,14 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use crate::backend::{CompilationBackend, PackageBackend, Runtime};
 use crate::dependencies::MavenRepo;
 use crate::module::Module;
+use crate::tasks::execute_task;
 
 mod backend;
 mod dependencies;
 mod javac_parser;
 mod manifest;
 mod module;
+mod tasks;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "jcargo", about = "Cargo but for java")]
@@ -107,8 +109,8 @@ async fn main() {
         buf.flush().await.unwrap();
     } else {
         let module = Module::load(&opts.working_dir, &env).await;
-        dbg!(&module);
+        //dbg!(&module);
 
-        module.execute_task(opts.task, &env).await;
+        execute_task(opts.task, &module, &env).await;
     }
 }
