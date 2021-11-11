@@ -7,7 +7,7 @@ Bringing Rust's excellent build tool to the JVM.
 - [x] Project model, configuration and management
     * [ ] Stable configuration model (TOML)
     * [x] Project initialization (jcargo init)
-    * [ ] Project cleanup (jcargo clean)
+    * [x] Project cleanup (jcargo clean)
     * [x] Consistency check (jcargo check)
     * [ ] Dependency handling
         - [x] Standard binary repositories

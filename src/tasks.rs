@@ -82,7 +82,9 @@ pub async fn execute_task(task: Task, module: &Module, env: &Env) {
                 instant.elapsed().as_millis()
             );
         }
-        Task::Clean => {}
+        Task::Clean => {
+            fs::remove_dir_all(module.dir.join("target")).await.unwrap();
+        }
         _ => {}
     }
 }
