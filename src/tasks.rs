@@ -1,9 +1,11 @@
+use std::future::Future;
 use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::Result;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, process};
 use walkdir::WalkDir;
@@ -12,16 +14,62 @@ use crate::backend::DocumentationBackend;
 use crate::dependencies::Dependency;
 use crate::{CompilationBackend, Env, Module, PackageBackend, Runtime, Task};
 
+pub async fn execute_task(
+    task: Task,
+    env: &Env,
+    module_resolver: impl Future<Output = Result<Module>>,
+) {
+    match task {
+        Task::Init { group, artifact } => {
+            println!("Init '{}:{}' in the current directory", group, artifact);
+            let manifest_path = PathBuf::from("jcargo.toml");
+            if manifest_path.exists() {
+                println!("Error: There is already a manifest in the current directory.");
+                return;
+            }
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&manifest_path)
+                .await
+                .unwrap();
+
+            let mut buf = BufWriter::new(file);
+            buf.write(
+                format!(
+                    r#"
+        group = "{}"
+        artifact = "{}"
+        version = "0.1.0"
+        "#,
+                    group, artifact
+                )
+                .as_ref(),
+            )
+            .await
+            .unwrap();
+            buf.flush().await.unwrap();
+        }
+        _ => {
+            let module = module_resolver.await.unwrap();
+            execute_task_mod(task, env, &module).await;
+        }
+    }
+}
+
 #[async_recursion::async_recursion]
-pub async fn execute_task(task: Task, module: &Module, env: &Env) {
+pub async fn execute_task_mod(task: Task, env: &Env, module: &Module) {
     match task {
         Task::Check => {
             println!("   Checking dependencies");
+            let instant = Instant::now();
+
             check(module).await;
-            println!("   Done !")
+
+            println!("   Done. (took {} ms)", instant.elapsed().as_millis());
         }
         Task::Build => {
-            execute_task(Task::Check, module, env).await;
+            execute_task_mod(Task::Check, env, module).await;
             println!(
                 "   Compiling {} v{} <path>",
                 module.artifact, module.version
@@ -36,7 +84,7 @@ pub async fn execute_task(task: Task, module: &Module, env: &Env) {
             );
         }
         Task::Run { entrypoint } => {
-            execute_task(Task::Build, module, env).await;
+            execute_task_mod(Task::Build, env, module).await;
             println!("   Running 'Main'");
             let instant = Instant::now();
 
@@ -63,9 +111,9 @@ pub async fn execute_task(task: Task, module: &Module, env: &Env) {
             docs,
             entrypoint,
         } => {
-            execute_task(Task::Build, module, env).await;
+            execute_task_mod(Task::Build, env, module).await;
             if docs {
-                execute_task(Task::Doc, module, env).await;
+                execute_task_mod(Task::Doc, env, module).await;
             }
 
             println!(
@@ -84,6 +132,7 @@ pub async fn execute_task(task: Task, module: &Module, env: &Env) {
         }
         Task::Clean => {
             fs::remove_dir_all(module.dir.join("target")).await.unwrap();
+            println!("Cleaned project (removed 'target' dir).")
         }
         _ => {}
     }

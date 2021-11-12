@@ -1,8 +1,11 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
+use tokio::fs;
+
 use crate::dependencies::Dependencies;
 use crate::manifest::{EntrypointDef, ModuleManifest};
 use crate::Env;
-use std::path::{Path, PathBuf};
-use tokio::fs;
 
 #[derive(Debug)]
 pub struct Module {
@@ -16,12 +19,10 @@ pub struct Module {
 }
 
 impl Module {
-    pub async fn load(path: &Path, env: &Env) -> Self {
-        let document = fs::read_to_string(path.join("jcargo.toml"))
-            .await
-            .expect("Can't read jcargo.toml file");
-        let manifest = ModuleManifest::parse(&document, None);
-        Self {
+    pub async fn load(path: &Path, env: &Env) -> Result<Self> {
+        let document = fs::read_to_string(path.join("jcargo.toml")).await?;
+        let manifest = ModuleManifest::parse(&document, None)?;
+        Ok(Self {
             dir: path.to_path_buf(),
             group: manifest.group.unwrap(),
             artifact: manifest.artifact,
@@ -29,7 +30,7 @@ impl Module {
             base_package: manifest.base_package,
             entrypoints: manifest.entrypoints,
             dependencies: Dependencies::from_def(manifest.dependencies, env),
-        }
+        })
     }
 
     /// Find an entrypoint with the given name.

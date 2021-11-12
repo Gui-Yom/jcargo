@@ -11,6 +11,7 @@ codegen-units = 4
 lto = "thin"
 
 [dependencies]
+anyhow = "1"
 async-recursion = "0.3"
 quick-xml = { version = "0.22", features = ["serialize"] }
 regex = "1"

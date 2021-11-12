@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use structopt::StructOpt;
-use tokio::io::{AsyncWriteExt, BufWriter};
 
 use crate::backend::{CompilationBackend, PackageBackend, Runtime};
 use crate::dependencies::MavenRepo;
@@ -78,39 +77,11 @@ async fn main() {
         package_backend: PackageBackend::JdkJar,
     };
 
-    if let Task::Init { group, artifact } = &opts.task {
-        println!("Init '{}:{}' in the current directory", group, artifact);
-        let manifest_path = PathBuf::from("jcargo.toml");
-        if manifest_path.exists() {
-            println!("Error: There is already a manifest in the current directory.");
-            return;
-        }
-        let file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&manifest_path)
-            .await
-            .unwrap();
-
-        let mut buf = BufWriter::new(file);
-        buf.write(
-            format!(
-                r#"
-        group = "{}"
-        artifact = "{}"
-        version = "0.1.0"
-        "#,
-                group, artifact
-            )
-            .as_ref(),
-        )
-        .await
-        .unwrap();
-        buf.flush().await.unwrap();
-    } else {
+    let module_resolver = async {
         let module = Module::load(&opts.working_dir, &env).await;
-        //dbg!(&module);
+        dbg!(&module);
+        module
+    };
 
-        execute_task(opts.task, &module, &env).await;
-    }
+    execute_task(opts.task, &env, module_resolver).await;
 }

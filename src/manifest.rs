@@ -1,3 +1,4 @@
+use anyhow::Result;
 use semver::VersionReq;
 use serde::Deserialize;
 
@@ -22,15 +23,14 @@ pub struct ModuleManifest {
 
 impl ModuleManifest {
     /// If parent is None, the manifest is the root manifest
-    pub fn parse(document: &str, parent: Option<&ModuleManifest>) -> Self {
-        let mut document: ModuleManifest =
-            toml::from_str(document).expect("Can't parse this document as valid module manifest");
+    pub fn parse(document: &str, parent: Option<&ModuleManifest>) -> Result<Self> {
+        let mut document: ModuleManifest = toml::from_str(document)?;
         if let Some(parent) = parent {
             if document.group.is_none() {
                 document.group = parent.group.clone();
             }
         }
-        document
+        Ok(document)
     }
 
     pub fn validate(&self) -> bool {
