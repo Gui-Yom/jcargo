@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use structopt::StructOpt;
 
-use crate::backend::{CompilationBackend, PackageBackend, Runtime};
+use crate::backend::{CompilationBackend, DocumentationBackend, PackageBackend, Runtime};
 use crate::dependencies::MavenRepo;
 use crate::module::Module;
 use crate::tasks::execute_task;
@@ -22,8 +22,8 @@ struct Opts {
     debug: bool,
     #[structopt(short, long = "--working-dir", default_value = ".")]
     working_dir: PathBuf,
-    #[structopt(short, long, default_value = "javac")]
-    backend: CompilationBackend,
+    #[structopt(long)]
+    native: bool,
     #[structopt(subcommand)]
     task: Task,
 }
@@ -59,6 +59,7 @@ pub struct Env {
     pub repos: Vec<Arc<MavenRepo>>,
     pub comp_backend: CompilationBackend,
     pub runtime: Runtime,
+    pub doc_backend: DocumentationBackend,
     pub package_backend: PackageBackend,
 }
 
@@ -72,9 +73,22 @@ async fn main() {
             name: "maven-central".to_string(),
             url: "https://repo.maven.apache.org/maven2".to_string(),
         })],
-        comp_backend: opts.backend,
+        comp_backend: if opts.native {
+            CompilationBackend::NativeJavac
+        } else {
+            CompilationBackend::JdkJavac
+        },
         runtime: Runtime::Java,
-        package_backend: PackageBackend::JdkJar,
+        doc_backend: if opts.native {
+            DocumentationBackend::NativeJavadoc
+        } else {
+            DocumentationBackend::JdkJavadoc
+        },
+        package_backend: if opts.native {
+            PackageBackend::NativeJar
+        } else {
+            PackageBackend::JdkJar
+        },
     };
 
     let module_resolver = async {

@@ -26,7 +26,10 @@ impl CompilationBackend {
             CompilationBackend::JdkJavac => process::Command::new("javac"),
             CompilationBackend::NativeJavac => {
                 let mut cmd = process::Command::new("native-jdktools");
-                cmd.arg("javac");
+                cmd.arg("javac").env(
+                    "JDKTOOLS_HOME",
+                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
+                );
                 cmd
             }
         }
@@ -61,7 +64,10 @@ impl DocumentationBackend {
             }
             DocumentationBackend::NativeJavadoc => {
                 let mut cmd = process::Command::new("native-jdktools");
-                cmd.arg("javadoc");
+                cmd.arg("javadoc").env(
+                    "JDKTOOLS_HOME",
+                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
+                );
                 cmd
             }
         }
@@ -83,7 +89,10 @@ impl PackageBackend {
             }
             PackageBackend::NativeJar => {
                 let mut cmd = process::Command::new("native-jdktools");
-                cmd.arg("jar");
+                cmd.arg("jar").env(
+                    "JDKTOOLS_HOME",
+                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
+                );
                 cmd
             }
         }

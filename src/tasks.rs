@@ -99,7 +99,7 @@ pub async fn execute_task_mod(task: Task, env: &Env, module: &Module) {
             println!("   Building documentation");
             let instant = Instant::now();
 
-            build_doc(module, DocumentationBackend::JdkJavadoc).await;
+            build_doc(module, env.doc_backend).await;
 
             println!(
                 "   Finished build. (took {} ms)",
@@ -173,17 +173,13 @@ pub async fn build(module: &Module, backend: CompilationBackend) {
         cmd.arg(it);
     });
 
-    cmd.env(
-        "JDKTOOLS_HOME",
-        "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-    )
-    .stdout(Stdio::inherit())
-    .stderr(Stdio::inherit())
-    .spawn()
-    .unwrap()
-    .wait_with_output()
-    .await
-    .unwrap();
+    cmd.stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .await
+        .unwrap();
 }
 
 pub async fn run(module: &Module, entrypoint_name: Option<String>) {
@@ -257,17 +253,13 @@ pub async fn build_doc(module: &Module, backend: DocumentationBackend) {
         cmd.arg(it);
     });
 
-    cmd.env(
-        "JDKTOOLS_HOME",
-        "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-    )
-    .stdout(Stdio::inherit())
-    .stderr(Stdio::inherit())
-    .spawn()
-    .unwrap()
-    .wait_with_output()
-    .await
-    .unwrap();
+    cmd.stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .await
+        .unwrap();
 }
 
 pub async fn package(
@@ -315,17 +307,13 @@ pub async fn package(
                 cmd.arg(it);
             });
 
-        cmd.env(
-            "JDKTOOLS_HOME",
-            "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-        )
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap()
-        .wait_with_output()
-        .await
-        .unwrap();
+        cmd.stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .await
+            .unwrap();
     }));
 
     if sources {
@@ -345,17 +333,13 @@ pub async fn package(
                     cmd.arg(it);
                 });
 
-            cmd.env(
-                "JDKTOOLS_HOME",
-                "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-            )
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap()
-            .wait_with_output()
-            .await
-            .unwrap();
+            cmd.stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap()
+                .wait_with_output()
+                .await
+                .unwrap();
         }));
     }
 
@@ -374,17 +358,13 @@ pub async fn package(
                 cmd.arg(it);
             });
 
-            cmd.env(
-                "JDKTOOLS_HOME",
-                "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-            )
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap()
-            .wait_with_output()
-            .await
-            .unwrap();
+            cmd.stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap()
+                .wait_with_output()
+                .await
+                .unwrap();
         }));
     }
 
