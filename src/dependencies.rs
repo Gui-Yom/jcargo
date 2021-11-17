@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 use semver::Version;
+use url::Url;
 
 use crate::manifest::{CompleteDependencyDef, DependenciesDef};
 use crate::Env;
@@ -97,7 +98,7 @@ impl Dependency {
 
     pub fn classpath(&self) -> String {
         match self {
-            Dependency::Repo(repodep) => format!("libs/{}", repodep.get_file()),
+            Dependency::Repo(repodep) => format!("libs/{}", repodep.get_file_name()),
             _ => todo!(),
         }
     }
@@ -127,12 +128,17 @@ impl RepoDependency {
         )
     }
 
-    pub fn get_file(&self) -> String {
+    pub fn get_file_name(&self) -> String {
         format!("{}-{}.jar", self.artifact, self.version)
     }
 
-    pub fn download_url(&self) -> String {
-        format!("{}/{}/{}", self.repo.url, self.get_path(), self.get_file())
+    pub fn download_url(&self) -> Url {
+        Url::parse(&self.repo.url)
+            .unwrap()
+            .join(&self.get_path())
+            .unwrap()
+            .join(&self.get_file_name())
+            .unwrap()
     }
 }
 

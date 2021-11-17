@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 
 use crate::backend::DocumentationBackend;
 use crate::dependencies::Dependency;
-use crate::{CompilationBackend, Env, Module, PackageBackend, Runtime, Task};
+use crate::{Env, JavaCompilationBackend, Module, PackageBackend, Runtime, Task};
 
 pub async fn execute_task(
     task: Task,
@@ -102,7 +102,7 @@ pub async fn execute_task_mod(task: Task, env: &Env, module: &Module) {
             build_doc(module, env.doc_backend).await;
 
             println!(
-                "   Finished build. (took {} ms)",
+                "   Finished building docs. (took {} ms)",
                 instant.elapsed().as_millis()
             );
         }
@@ -142,9 +142,9 @@ pub async fn check(module: &Module) {
     setup_all_dependencies(module).await;
 }
 
-pub async fn build(module: &Module, backend: CompilationBackend) {
+pub async fn build(module: &Module, backend: JavaCompilationBackend) {
     let mut cmd: process::Command = backend.command();
-    let output_dir = format!("{}/target/classes", module.dir.display());
+    let output_dir = module.classes_dir();
     cmd.args([
         "-source",
         "17",
@@ -154,7 +154,7 @@ pub async fn build(module: &Module, backend: CompilationBackend) {
         "UTF-8",
         "-Xlint",
         "-d",
-        &output_dir,
+        &output_dir.display().to_string(),
         "-cp",
     ]);
 
@@ -163,13 +163,13 @@ pub async fn build(module: &Module, backend: CompilationBackend) {
         .dependencies
         .iter_compile()
         .map(|it| format!("{}/{}", module.dir.display(), it.classpath()))
-        .chain(iter::once(output_dir))
+        .chain(iter::once(output_dir.display().to_string()))
         .reduce(|a, b| format!("{};{}", a, b))
         .unwrap();
     cmd.arg(&cp);
     println!("compile classpath: {}", &cp);
 
-    collect_files(module.dir.join("src")).for_each(|it| {
+    collect_files(&module.source_dir()).for_each(|it| {
         cmd.arg(it);
     });
 
@@ -183,7 +183,7 @@ pub async fn build(module: &Module, backend: CompilationBackend) {
 }
 
 pub async fn run(module: &Module, entrypoint_name: Option<String>) {
-    let output_dir = format!("{}/target/classes", module.dir.display());
+    let output_dir = module.classes_dir();
 
     let class;
     match entrypoint_name {
@@ -211,7 +211,7 @@ pub async fn run(module: &Module, entrypoint_name: Option<String>) {
         .dependencies
         .iter_runtime()
         .map(|it| format!("{}/{}", module.dir.display(), it.classpath()))
-        .chain(iter::once(output_dir))
+        .chain(iter::once(output_dir.display().to_string()))
         .reduce(|a, b| format!("{};{}", a, b))
         .unwrap();
     cmd.arg(&cp);
@@ -231,13 +231,11 @@ pub async fn run(module: &Module, entrypoint_name: Option<String>) {
 pub async fn build_doc(module: &Module, backend: DocumentationBackend) {
     let mut cmd: process::Command = backend.command();
 
-    tokio::fs::create_dir_all(module.dir.join("target/docs"))
-        .await
-        .unwrap();
+    let output = module.docs_dir();
 
-    cmd.arg("-d")
-        .arg(&format!("{}/target/docs", module.dir.display()))
-        .arg("-cp");
+    tokio::fs::create_dir_all(&output).await.unwrap();
+
+    cmd.arg("-d").arg(&output.display().to_string()).arg("-cp");
 
     // Collect dependencies include paths
     let cp = module
@@ -249,7 +247,7 @@ pub async fn build_doc(module: &Module, backend: DocumentationBackend) {
     cmd.arg(&cp);
     println!("compile classpath: {}", &cp);
 
-    collect_files(module.dir.join("src")).for_each(|it| {
+    collect_files(&module.source_dir()).for_each(|it| {
         cmd.arg(it);
     });
 
@@ -270,7 +268,7 @@ pub async fn package(
     entrypoint: Option<String>,
 ) {
     let base_dir = Arc::new(module.dir.clone());
-    let artifact_dir = module.dir.join("target/artifacts");
+    let artifact_dir = module.artifacts_dir();
     let artifact_base_name = Arc::new(format!(
         "{}/{}-{}",
         artifact_dir.display(),
@@ -284,7 +282,7 @@ pub async fn package(
         .flatten()
         .map(|it| it.class.clone());
 
-    tokio::fs::create_dir_all(artifact_dir).await.unwrap();
+    tokio::fs::create_dir_all(&artifact_dir).await.unwrap();
 
     let base_dir2 = base_dir.clone();
     let artifact_base_name2 = artifact_base_name.clone();
@@ -299,13 +297,13 @@ pub async fn package(
 
         if let Some(entrypoint) = entrypoint_class {
             cmd.arg("-e").arg(&entrypoint);
+        } else {
+            cmd.arg("-M");
         }
 
-        collect_files(base_dir2.join("target/classes"))
-            .chain(collect_files(base_dir2.join("resources")))
-            .for_each(|it| {
-                cmd.arg(it);
-            });
+        cmd.arg("-C")
+            .arg(&base_dir2.join("target/classes"))
+            .arg(".");
 
         cmd.stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -324,14 +322,11 @@ pub async fn package(
 
             // Create mode
             cmd.arg("-c")
+                .arg("-M")
                 .arg("-f")
                 .arg(&format!("{}-sources.jar", artifact_base_name2));
 
-            collect_files(base_dir2.join("src"))
-                .chain(collect_files(base_dir2.join("resources")))
-                .for_each(|it| {
-                    cmd.arg(it);
-                });
+            cmd.arg("-C").arg(&base_dir2.join("src")).arg(".");
 
             cmd.stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
@@ -351,12 +346,12 @@ pub async fn package(
 
             // Create mode
             cmd.arg("-c")
+                .arg("-M")
                 .arg("-f")
                 .arg(&format!("{}-docs.jar", artifact_base_name2));
 
-            collect_files(base_dir2.join("docs")).for_each(|it| {
-                cmd.arg(it);
-            });
+            let docs_dir = base_dir2.join("target/docs");
+            cmd.arg("-C").arg(&docs_dir).arg(".");
 
             cmd.stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
@@ -399,7 +394,7 @@ async fn setup_all_dependencies(module: &Module) {
                     // TODO download dependencies to a known place
                     // TODO verify file hash for update
 
-                    let file_path = dir.join(&repodep.get_file());
+                    let file_path = dir.join(&repodep.get_file_name());
 
                     if file_path.exists() {
                         println!("Dependency '{}' OK", repodep);
@@ -408,7 +403,7 @@ async fn setup_all_dependencies(module: &Module) {
 
                     println!("Downloading '{}' from {}", repodep, repodep.repo.name);
 
-                    let mut res = client.get(&repodep.download_url()).send().await.unwrap();
+                    let mut res = client.get(repodep.download_url()).send().await.unwrap();
 
                     let file = fs::OpenOptions::new()
                         .write(true)

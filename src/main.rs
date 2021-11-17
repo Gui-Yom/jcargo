@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use structopt::StructOpt;
 
-use crate::backend::{CompilationBackend, DocumentationBackend, PackageBackend, Runtime};
+use crate::backend::{DocumentationBackend, JavaCompilationBackend, PackageBackend, Runtime};
 use crate::dependencies::MavenRepo;
 use crate::module::Module;
 use crate::tasks::execute_task;
@@ -57,7 +57,7 @@ pub enum Task {
 #[derive(Debug)]
 pub struct Env {
     pub repos: Vec<Arc<MavenRepo>>,
-    pub comp_backend: CompilationBackend,
+    pub comp_backend: JavaCompilationBackend,
     pub runtime: Runtime,
     pub doc_backend: DocumentationBackend,
     pub package_backend: PackageBackend,
@@ -74,9 +74,9 @@ async fn main() {
             url: "https://repo.maven.apache.org/maven2".to_string(),
         })],
         comp_backend: if opts.native {
-            CompilationBackend::NativeJavac
+            JavaCompilationBackend::NativeJavac
         } else {
-            CompilationBackend::JdkJavac
+            JavaCompilationBackend::JdkJavac
         },
         runtime: Runtime::Java,
         doc_backend: if opts.native {

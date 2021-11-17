@@ -1,36 +1,57 @@
+use std::env;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use tokio::process;
 
 #[derive(Debug, Copy, Clone)]
-pub enum CompilationBackend {
+pub enum JavaCompilationBackend {
     JdkJavac,
     NativeJavac,
 }
 
-impl FromStr for CompilationBackend {
+impl FromStr for JavaCompilationBackend {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "javac" => Ok(CompilationBackend::JdkJavac),
-            "native" => Ok(CompilationBackend::NativeJavac),
+            "javac" => Ok(JavaCompilationBackend::JdkJavac),
+            "native" => Ok(JavaCompilationBackend::NativeJavac),
             other => Err(format!("Can't convert {} to a valid Backend", other)),
         }
     }
 }
 
-impl CompilationBackend {
+impl JavaCompilationBackend {
     pub fn command(&self) -> process::Command {
         match self {
-            CompilationBackend::JdkJavac => process::Command::new("javac"),
-            CompilationBackend::NativeJavac => {
+            JavaCompilationBackend::JdkJavac => process::Command::new("javac"),
+            JavaCompilationBackend::NativeJavac => {
                 let mut cmd = process::Command::new("native-jdktools");
                 cmd.arg("javac").env(
                     "JDKTOOLS_HOME",
                     "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
                 );
                 cmd
+            }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum KotlinCompilationBackend {
+    Kotlinc,
+}
+
+impl KotlinCompilationBackend {
+    pub fn command(&self) -> process::Command {
+        match self {
+            KotlinCompilationBackend::Kotlinc => {
+                let path = PathBuf::from(
+                    env::var("KOTLINC_HOME")
+                        .expect("KOTLINC_HOME expected to be set to where kotlinc is installed."),
+                );
+                process::Command::new(path.join("bin/kotlinc"))
             }
         }
     }

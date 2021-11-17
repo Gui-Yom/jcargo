@@ -9,11 +9,14 @@ use crate::Env;
 
 #[derive(Debug)]
 pub struct Module {
+    /// Module root directory
     pub dir: PathBuf,
+    /// Artifact group
     pub group: String,
+    /// Artifact id
     pub artifact: String,
+    /// Project version
     pub version: String,
-    pub base_package: String,
     pub entrypoints: Vec<EntrypointDef>,
     pub dependencies: Dependencies,
 }
@@ -27,7 +30,6 @@ impl Module {
             group: manifest.group.unwrap(),
             artifact: manifest.artifact,
             version: manifest.version,
-            base_package: manifest.base_package,
             entrypoints: manifest.entrypoints,
             dependencies: Dependencies::from_def(manifest.dependencies, env),
         })
@@ -45,5 +47,29 @@ impl Module {
     /// Pick the first in the list.
     pub fn pick_entrypoint(&self) -> Option<&EntrypointDef> {
         self.entrypoints.first()
+    }
+
+    pub fn source_dir(&self) -> PathBuf {
+        self.dir.join("src")
+    }
+
+    pub fn resources_dir(&self) -> PathBuf {
+        self.dir.join("resources")
+    }
+
+    pub fn target_dir(&self) -> PathBuf {
+        self.dir.join("target")
+    }
+
+    pub fn classes_dir(&self) -> PathBuf {
+        self.target_dir().join("classes")
+    }
+
+    pub fn docs_dir(&self) -> PathBuf {
+        self.target_dir().join("docs")
+    }
+
+    pub fn artifacts_dir(&self) -> PathBuf {
+        self.target_dir().join("artifacts")
     }
 }

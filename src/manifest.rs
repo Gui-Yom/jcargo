@@ -9,8 +9,6 @@ pub struct ModuleManifest {
     pub group: Option<String>,
     pub artifact: String,
     pub version: String,
-    #[serde(default)]
-    pub base_package: String,
     #[serde(flatten)]
     pub extra_info: ExtraInfo,
     // May be a library

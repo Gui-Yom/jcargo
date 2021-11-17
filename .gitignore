@@ -1,5 +1,5 @@
 /target
-/testproject/target
 /.idea
 *.exe
 *.jar
+/kotlinc

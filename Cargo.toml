@@ -21,4 +21,5 @@ serde = { version = "1", features = ["derive"] }
 structopt = { version = "0.3", features = ["color"] }
 tokio = { version = "1", features = ["full"] }
 toml = "0.5"
+url = "2"
 walkdir = "2"
