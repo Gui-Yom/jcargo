@@ -26,7 +26,7 @@ Bringing Rust's excellent build tool to the JVM.
     * [x] Javadoc generation
     * [ ] Annotation processing
 - [ ] Kotlin support
-    * [ ] JVM Compilation support
+    * [x] JVM Compilation support
     * [ ] Kdoc generation
     * [ ] Annotation processing
 - [ ] Packaging

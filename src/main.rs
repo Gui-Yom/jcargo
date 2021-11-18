@@ -13,6 +13,7 @@ mod backend;
 mod dependencies;
 mod javac_parser;
 mod manifest;
+mod mavenpom;
 mod module;
 mod tasks;
 
