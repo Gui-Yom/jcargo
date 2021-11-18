@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use structopt::StructOpt;
+use url::Url;
 
 use crate::backend::{DocumentationBackend, JavaCompilationBackend, PackageBackend, Runtime};
 use crate::dependencies::MavenRepo;
@@ -66,12 +67,12 @@ pub struct Env {
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     let opts = Opts::from_args();
-    dbg!(&opts);
+    //dbg!(&opts);
 
     let env = Env {
         repos: vec![Arc::new(MavenRepo {
             name: "maven-central".to_string(),
-            url: "https://repo.maven.apache.org/maven2".to_string(),
+            url: Url::parse("https://repo.maven.apache.org/maven2/").unwrap(),
         })],
         comp_backend: if opts.native {
             JavaCompilationBackend::NativeJavac
@@ -93,7 +94,7 @@ async fn main() {
 
     let module_resolver = async {
         let module = Module::load(&opts.working_dir, &env).await;
-        dbg!(&module);
+        //dbg!(&module);
         module
     };
 

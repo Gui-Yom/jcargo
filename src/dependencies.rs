@@ -107,7 +107,7 @@ impl Dependency {
 #[derive(Debug, Clone)]
 pub struct MavenRepo {
     pub name: String,
-    pub url: String,
+    pub url: Url,
 }
 
 #[derive(Debug, Clone)]
@@ -121,7 +121,7 @@ pub struct RepoDependency {
 impl RepoDependency {
     pub fn get_path(&self) -> String {
         format!(
-            "{}/{}/{}",
+            "{}/{}/{}/",
             self.group.replace(".", "/"),
             self.artifact,
             self.version
@@ -133,8 +133,8 @@ impl RepoDependency {
     }
 
     pub fn download_url(&self) -> Url {
-        Url::parse(&self.repo.url)
-            .unwrap()
+        self.repo
+            .url
             .join(&self.get_path())
             .unwrap()
             .join(&self.get_file_name())

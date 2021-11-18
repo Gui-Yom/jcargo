@@ -1,7 +1,6 @@
 group = "marais"
-artifact = "testproject"
+artifact = "testprojectkt"
 version = "0.1.0"
-base_package = ""
 
 [dependencies]
 # Compile and runtime dependencies
@@ -17,8 +16,4 @@ compile = []
 transitive = []
 
 [[entrypoints]]
-class = "Main"
-
-[[entrypoints]]
-name = "Other"
-class = "OtherMain"
+class = "MainKt"

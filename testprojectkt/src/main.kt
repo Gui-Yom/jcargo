@@ -1,3 +1,3 @@
 fun main() {
-	println("Hello from kotlin")
+	println("${Lib.hello()} from kotlin")
 }

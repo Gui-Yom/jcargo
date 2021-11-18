@@ -51,7 +51,9 @@ impl KotlinCompilationBackend {
                     env::var("KOTLINC_HOME")
                         .expect("KOTLINC_HOME expected to be set to where kotlinc is installed."),
                 );
-                process::Command::new(path.join("bin/kotlinc"))
+                let mut cmd = process::Command::new("cmd");
+                cmd.arg("/C").arg(path.join("bin/kotlinc"));
+                cmd
             }
         }
     }

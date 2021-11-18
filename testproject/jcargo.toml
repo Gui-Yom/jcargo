@@ -1,7 +1,6 @@
 group = "marais"
 artifact = "testproject"
 version = "0.1.0"
-base_package = ""
 
 [dependencies]
 # Compile and runtime dependencies

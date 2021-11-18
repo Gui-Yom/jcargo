@@ -10,7 +10,7 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, process};
 use walkdir::WalkDir;
 
-use crate::backend::DocumentationBackend;
+use crate::backend::{DocumentationBackend, KotlinCompilationBackend};
 use crate::dependencies::Dependency;
 use crate::{Env, JavaCompilationBackend, Module, PackageBackend, Runtime, Task};
 
@@ -143,43 +143,101 @@ pub async fn check(module: &Module) {
 }
 
 pub async fn build(module: &Module, backend: JavaCompilationBackend) {
-    let mut cmd: process::Command = backend.command();
+    let source_dir = module.source_dir();
     let output_dir = module.classes_dir();
-    cmd.args([
-        "-source",
-        "17",
-        "-target",
-        "17",
-        "-encoding",
-        "UTF-8",
-        "-Xlint",
-        "-d",
-        &output_dir.display().to_string(),
-        "-cp",
-    ]);
+    fs::create_dir_all(&output_dir).await.unwrap();
 
-    // Collect dependencies include paths
-    let cp = module
-        .dependencies
-        .iter_compile()
-        .map(|it| format!("{}/{}", module.dir.display(), it.classpath()))
-        .chain(iter::once(output_dir.display().to_string()))
-        .reduce(|a, b| format!("{};{}", a, b))
-        .unwrap();
-    cmd.arg(&cp);
-    println!("compile classpath: {}", &cp);
+    // We need to build kotlin first since it can handle java source files
+    // Javac can't handle kotlin source files
+    // Required for Java <-> Kotlin references
 
-    collect_files(&module.source_dir()).for_each(|it| {
-        cmd.arg(it);
-    });
+    let mut sources = collect_files(&source_dir, Some(&[".kt", ".java"])).peekable();
+    // Pass if no kotlin sources
+    if sources.peek().is_some() {
+        println!("Detected kotlin sources ...");
 
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap()
-        .wait_with_output()
-        .await
-        .unwrap();
+        let mut ktcmd = KotlinCompilationBackend::Kotlinc.command();
+        ktcmd.args([
+            "-jvm-target",
+            "17",
+            "-language-version",
+            "1.6",
+            "-d",
+            &output_dir.display().to_string(),
+            "-cp",
+        ]);
+
+        // Collect dependencies include paths
+        let cp = module
+            .dependencies
+            .iter_compile()
+            .map(|it| format!("{}/{}", module.dir.display(), it.classpath()))
+            .chain(iter::once(output_dir.display().to_string()))
+            .reduce(|a, b| format!("{};{}", a, b))
+            .unwrap();
+        ktcmd.arg(&cp);
+        println!("compile classpath: {}", &cp);
+
+        sources.for_each(|it| {
+            ktcmd.arg(it);
+        });
+
+        ktcmd
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .await
+            .unwrap();
+
+        println!("Compiled kotlin sources.");
+    }
+
+    let mut sources = collect_files(&source_dir, Some(&[".java"])).peekable();
+    // Pass if no java sources
+    if sources.peek().is_some() {
+        println!("Detected java sources ...");
+
+        let mut cmd: process::Command = backend.command();
+        cmd.args([
+            "-source",
+            "17",
+            "-target",
+            "17",
+            "-encoding",
+            "UTF-8",
+            "-Xlint",
+            "-d",
+            &output_dir.display().to_string(),
+            "-cp",
+        ]);
+
+        // Collect dependencies include paths
+        let cp = module
+            .dependencies
+            .iter_compile()
+            .map(|it| format!("{}/{}", module.dir.display(), it.classpath()))
+            .chain(iter::once(output_dir.display().to_string()))
+            .reduce(|a, b| format!("{};{}", a, b))
+            .unwrap();
+        cmd.arg(&cp);
+        println!("compile classpath: {}", &cp);
+
+        sources.for_each(|it| {
+            cmd.arg(it);
+        });
+
+        cmd.stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .await
+            .unwrap();
+
+        println!("Compiled kotlin sources.");
+    }
 }
 
 pub async fn run(module: &Module, entrypoint_name: Option<String>) {
@@ -247,7 +305,7 @@ pub async fn build_doc(module: &Module, backend: DocumentationBackend) {
     cmd.arg(&cp);
     println!("compile classpath: {}", &cp);
 
-    collect_files(&module.source_dir()).for_each(|it| {
+    collect_files(&module.source_dir(), Some(&[".java"])).for_each(|it| {
         cmd.arg(it);
     });
 
@@ -368,11 +426,29 @@ pub async fn package(
     }
 }
 
-fn collect_files<P: AsRef<Path>>(path: P) -> impl Iterator<Item = PathBuf> {
+fn collect_files<P: AsRef<Path>>(
+    path: P,
+    extensions: Option<&'static [&'static str]>,
+) -> impl Iterator<Item = PathBuf> {
     WalkDir::new(path)
+        .sort_by_file_name()
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|it| it.file_type().is_file())
+        .filter(move |it| {
+            if it.file_type().is_file() {
+                if let Some(extensions) = extensions {
+                    let file_name = it.file_name().to_str().unwrap();
+                    for e in extensions {
+                        if file_name.ends_with(e) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        })
         .map(|it| it.path().to_path_buf())
 }
 
@@ -403,21 +479,27 @@ async fn setup_all_dependencies(module: &Module) {
 
                     println!("Downloading '{}' from {}", repodep, repodep.repo.name);
 
-                    let mut res = client.get(repodep.download_url()).send().await.unwrap();
+                    let url = repodep.download_url();
+                    //dbg!(&url);
+                    let mut res = client.get(url).send().await.unwrap();
 
-                    let file = fs::OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(&file_path)
-                        .await
-                        .expect("Can't create/open file");
-                    let mut buf_file = BufWriter::new(file);
-                    while let Some(chunk) = res.chunk().await.expect("Can't get a chunk") {
-                        buf_file.write(&chunk).await.unwrap();
+                    if res.status().is_success() {
+                        let file = fs::OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&file_path)
+                            .await
+                            .expect("Can't create/open file");
+                        let mut buf_file = BufWriter::new(file);
+                        while let Some(chunk) = res.chunk().await.expect("Can't get a chunk") {
+                            buf_file.write(&chunk).await.unwrap();
+                        }
+                        buf_file.flush().await.expect("Can't write file to disk");
+                        println!("Downloaded {}", repodep);
+                    } else {
+                        panic!("Failed to download {}", repodep);
                     }
-                    buf_file.flush().await.expect("Can't write file to disk");
-                    println!("Downloaded {}", repodep);
                 }
                 _ => {
                     todo!()
