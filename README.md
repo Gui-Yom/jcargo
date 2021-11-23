@@ -1,6 +1,25 @@
 # jcargo
 
-Bringing Rust's excellent build tool to the JVM.
+Trying to remake Rust's excellent build tool for the JVM ecosystem.
+
+## Installation
+
+### Download a prebuilt binary
+
+See the release page.
+
+### Building from source with cargo
+
+Requires at least `Rust 1.56`.
+
+```shell
+cargo install jcargo
+```
+
+## Runtime
+
+For now, `JDK_HOME/bin` must be in your path for jcargo to find the jdk tools. If you want to
+compile kotlin sources, set `KOTLINC_HOME` to point to the installation directory of kotlinc.
 
 ## Roadmap for 1.0
 
@@ -10,7 +29,11 @@ Bringing Rust's excellent build tool to the JVM.
     * [x] Project cleanup (jcargo clean)
     * [x] Consistency check (jcargo check)
     * [ ] Dependency handling
-        - [x] Standard binary repositories
+        - [ ] Standard maven binary repositories
+            * [x] Maven pom parsing
+            * [ ] Recurse and merge poms
+            * [ ] Download full dependency tree
+            * [ ] Gradle metadata ?
         - [ ] Custom binary repositories
         - [ ] Git dependencies
         - [ ] Local dependency
@@ -25,10 +48,16 @@ Bringing Rust's excellent build tool to the JVM.
     * [x] Compilation
     * [x] Javadoc generation
     * [ ] Annotation processing
+    * [ ] Toolchain handling
+        - [ ] Handle source and target versions
+        - [ ] Handle jdk installations
 - [ ] Kotlin support
     * [x] JVM Compilation support
     * [ ] Kdoc generation
     * [ ] Annotation processing
+    * [ ] Toolchain handling
+        - [ ] Handle source and target versions
+        - [ ] Handle kotlinc and jdk installations
 - [ ] Packaging
     * [x] Application jar
     * [x] Documentation jar
