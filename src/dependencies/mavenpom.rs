@@ -1,18 +1,37 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-/// No properties xml element with only a string body
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// Xml element with only a string body
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct Element {
     #[serde(rename = "$value")]
     pub value: String,
 }
 
 impl Element {
-    pub fn new(value: String) -> Self {
-        Self { value }
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
+
+impl<S> From<S> for Element
+where
+    S: Into<String>,
+{
+    fn from(s: S) -> Self {
+        Element::new(s)
+    }
+}
+
+impl Display for Element {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
     }
 }
 
@@ -21,12 +40,22 @@ impl Element {
 pub struct MavenPom {
     #[serde(rename = "modelVersion")]
     pub model_version: Element,
+    /// If none, then derived from parent
+    #[serde(rename = "groupId")]
+    pub group_id: Option<Element>,
+    #[serde(rename = "artifactId")]
+    pub artifact_id: Element,
+    /// If none, then derived from parent
+    pub version: Option<Element>,
+    /// None if this is a top level pom
     pub parent: Option<ParentPom>,
     pub properties: Option<HashMap<String, String>>,
     pub dependencies: Option<PomDependencies>,
     #[serde(rename = "dependencyManagement")]
     pub dependency_management: Option<DependencyManagement>,
 }
+
+pub type Properties = HashMap<String, String>;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ParentPom {
@@ -63,14 +92,22 @@ pub struct DependencyManagement {
 
 impl MavenPom {
     pub fn parse(text: &str) -> Result<Self> {
-        let pom: Self = quick_xml::de::from_str(text)?;
+        let mut pom: Self = quick_xml::de::from_str(text)?;
+        if pom.group_id.is_none() {
+            pom.group_id = Some(pom.parent.as_ref().unwrap().group_id.clone());
+        }
+        if pom.version.is_none() {
+            pom.version = Some(pom.parent.as_ref().unwrap().version.clone());
+        }
         Ok(pom)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::mavenpom::{Element, MavenPom, ParentPom, PomDependencies, PomDependency};
+    use crate::dependencies::mavenpom::{
+        Element, MavenPom, ParentPom, PomDependencies, PomDependency,
+    };
 
     #[test]
     fn test_parse() {
@@ -130,26 +167,29 @@ mod tests {
         println!(
             "{}",
             quick_xml::se::to_string(&MavenPom {
-                model_version: Element::new("4.0.0".to_string()),
+                model_version: "4.0.0".into(),
+                group_id: None,
+                artifact_id: "jcargo-bin".into(),
+                version: None,
                 parent: Some(ParentPom {
-                    group_id: Element::new("marais".to_string()),
-                    artifact_id: Element::new("jcargo".to_string()),
-                    version: Element::new("0.1.0".to_string()),
-                    relative_path: Element::new(String::new()),
+                    group_id: "marais".into(),
+                    artifact_id: "jcargo".into(),
+                    version: "0.1.0".into(),
+                    relative_path: "".into(),
                 }),
                 properties: Some([("a".to_string(), "b".to_string())].into_iter().collect()),
                 dependencies: Some(PomDependencies {
                     dependencies: vec![
                         PomDependency {
-                            group_id: Element::new("marais".to_string()),
-                            artifact_id: Element::new("pomreader".to_string()),
+                            group_id: "marais".into(),
+                            artifact_id: "pomreader".into(),
                             version: None,
                             scope: None,
                             r#type: None,
                         },
                         PomDependency {
-                            group_id: Element::new("marais".to_string()),
-                            artifact_id: Element::new("pomreader".to_string()),
+                            group_id: "marais".into(),
+                            artifact_id: "pomreader".into(),
                             version: None,
                             scope: None,
                             r#type: None,

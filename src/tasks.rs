@@ -12,6 +12,7 @@ use walkdir::WalkDir;
 
 use crate::backend::{DocumentationBackend, KotlinCompilationBackend};
 use crate::dependencies::Dependency;
+use crate::download::download_file;
 use crate::{Env, JavaCompilationBackend, Module, PackageBackend, Runtime, Task};
 
 pub async fn execute_task(
@@ -479,27 +480,13 @@ async fn setup_all_dependencies(module: &Module) {
 
                     println!("Downloading '{}' from {}", repodep, repodep.repo.name);
 
-                    let url = repodep.download_url();
+                    let url = repodep.jar_url();
                     //dbg!(&url);
-                    let mut res = client.get(url).send().await.unwrap();
+                    download_file(client.as_ref(), url, &file_path)
+                        .await
+                        .unwrap();
 
-                    if res.status().is_success() {
-                        let file = fs::OpenOptions::new()
-                            .write(true)
-                            .create(true)
-                            .truncate(true)
-                            .open(&file_path)
-                            .await
-                            .expect("Can't create/open file");
-                        let mut buf_file = BufWriter::new(file);
-                        while let Some(chunk) = res.chunk().await.expect("Can't get a chunk") {
-                            buf_file.write(&chunk).await.unwrap();
-                        }
-                        buf_file.flush().await.expect("Can't write file to disk");
-                        println!("Downloaded {}", repodep);
-                    } else {
-                        panic!("Failed to download {}", repodep);
-                    }
+                    println!("Downloaded {}", repodep);
                 }
                 _ => {
                     todo!()

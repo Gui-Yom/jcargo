@@ -11,9 +11,9 @@ use crate::tasks::execute_task;
 
 mod backend;
 mod dependencies;
+mod download;
 mod javac_parser;
 mod manifest;
-mod mavenpom;
 mod module;
 mod tasks;
 

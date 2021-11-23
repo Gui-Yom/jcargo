@@ -7,6 +7,9 @@ use url::Url;
 use crate::manifest::{CompleteDependencyDef, DependenciesDef};
 use crate::Env;
 
+pub mod maven;
+pub mod mavenpom;
+
 #[derive(Debug, Clone)]
 pub struct Dependencies {
     pub compile: Vec<Dependency>,
@@ -128,16 +131,47 @@ impl RepoDependency {
         )
     }
 
-    pub fn get_file_name(&self) -> String {
-        format!("{}-{}.jar", self.artifact, self.version)
+    pub fn get_base_name(&self) -> String {
+        format!("{}-{}", self.artifact, self.version)
     }
 
-    pub fn download_url(&self) -> Url {
+    pub fn get_file_name(&self) -> String {
+        format!("{}.jar", self.get_base_name())
+    }
+
+    pub fn jar_url(&self) -> Url {
         self.repo
             .url
             .join(&self.get_path())
             .unwrap()
             .join(&self.get_file_name())
+            .unwrap()
+    }
+
+    pub fn sources_url(&self) -> Url {
+        self.repo
+            .url
+            .join(&self.get_path())
+            .unwrap()
+            .join(&format!("{}-sources.jar", self.get_base_name()))
+            .unwrap()
+    }
+
+    pub fn docs_url(&self) -> Url {
+        self.repo
+            .url
+            .join(&self.get_path())
+            .unwrap()
+            .join(&format!("{}-javadoc.jar", self.get_base_name()))
+            .unwrap()
+    }
+
+    pub fn pom_url(&self) -> Url {
+        self.repo
+            .url
+            .join(&self.get_path())
+            .unwrap()
+            .join(&format!("{}.pom", self.get_base_name()))
             .unwrap()
     }
 }
