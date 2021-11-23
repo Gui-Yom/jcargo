@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
+use regex::Captures;
+
 use crate::dependencies::mavenpom::{
     Element, MavenPom, PomDependencies, PomDependency, Properties,
 };
@@ -58,7 +60,8 @@ pub fn merge_poms(parent: &MavenPom, child: &MavenPom) -> MavenPom {
         group_id: child.group_id.clone().or(parent.group_id.clone()),
         artifact_id: child.artifact_id.clone(),
         version: child.version.clone().or(parent.version.clone()),
-        parent: child.parent.clone(),
+        // The resulting merged pom has no parent
+        parent: None,
         properties: props,
         dependencies: deps,
         dependency_management: None,
@@ -105,10 +108,23 @@ fn merge_properties(pprops: &Properties, cprops: &Properties) -> Properties {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use reqwest::Client;
+
     use crate::dependencies::maven::merge_poms;
     use crate::dependencies::mavenpom::{
-        Element, MavenPom, ParentPom, PomDependencies, PomDependency, Properties,
+        Element, MavenPom, ParentPom, PomDependencies, PomDependency, Properties, PropertiesExt,
     };
+
+    #[test]
+    fn test_resolve_props() {
+        let mut props = Properties::from([
+            ("a".to_string(), "value".to_string()),
+            ("b".to_string(), "c${a}".to_string()),
+        ]);
+        assert_eq!(props.get_resolve("b"), Some("cvalue".to_string()));
+    }
 
     #[test]
     fn test() {
@@ -137,7 +153,7 @@ mod tests {
                         group_id: "marais".into(),
                         artifact_id: "jcargo".into(),
                         version: "0.1.0".into(),
-                        relative_path: "../".into(),
+                        //relative_path: None,
                     }),
                     properties: None,
                     dependencies: Some(PomDependencies {
@@ -153,5 +169,50 @@ mod tests {
                 },
             )
         );
+    }
+
+    #[tokio::test]
+    async fn test_real() -> anyhow::Result<()> {
+        let client = Client::new();
+
+        let pom = client
+            .get("https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j-api/2.14.1/log4j-api-2.14.1.pom")
+            .send()
+            .await?
+            .text()
+            .await?;
+        let pomC = MavenPom::parse(&pom)?;
+        println!("parsed pom C {:#?}", pomC);
+
+        let pom = client.get("https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j/2.14.1/log4j-2.14.1.pom").send()
+            .await?
+            .text()
+            .await?;
+        let pomB = MavenPom::parse(&pom)?;
+        println!("parsed pom B {:#?}", pomB);
+
+        let pom = client.get("https://repo.maven.apache.org/maven2/org/apache/logging/logging-parent/3/logging-parent-3.pom").send()
+            .await?
+            .text()
+            .await?;
+        let pomA = MavenPom::parse(&pom)?;
+        println!("parsed pom A {:#?}", pomA);
+
+        let pom = client
+            .get("https://repo.maven.apache.org/maven2/org/apache/apache/23/apache-23.pom")
+            .send()
+            .await?
+            .text()
+            .await?;
+        let pomA2 = MavenPom::parse(&pom)?;
+        println!("parsed pom A2 {:#?}", pomA2);
+
+        let merged = merge_poms(&pomA2, &pomA);
+        let merged = merge_poms(&merged, &pomB);
+        let mut merged = merge_poms(&merged, &pomC);
+
+        println!("merged {:#?}", merged);
+
+        Ok(())
     }
 }

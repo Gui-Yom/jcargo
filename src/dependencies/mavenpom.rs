@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 
 use anyhow::Result;
+use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
 
 /// Xml element with only a string body
@@ -57,6 +58,22 @@ pub struct MavenPom {
 
 pub type Properties = HashMap<String, String>;
 
+pub trait PropertiesExt {
+    fn get_resolve(&self, key: &str) -> Option<String>;
+}
+
+impl PropertiesExt for Properties {
+    fn get_resolve(&self, key: &str) -> Option<String> {
+        let pat = Regex::new("\\$\\{(?P<prop_name>.+)\\}").unwrap();
+        self.get(key).map(|it| {
+            pat.replace_all(it, |caps: &Captures| {
+                self.get(caps.name("prop_name").unwrap().as_str()).unwrap()
+            })
+            .to_string()
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ParentPom {
     #[serde(rename = "groupId")]
@@ -64,8 +81,8 @@ pub struct ParentPom {
     #[serde(rename = "artifactId")]
     pub artifact_id: Element,
     pub version: Element,
-    #[serde(rename = "relativePath")]
-    pub relative_path: Element,
+    //#[serde(rename = "relativePath")]
+    //pub relative_path: Option<Element>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -105,62 +122,11 @@ impl MavenPom {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+
     use crate::dependencies::mavenpom::{
         Element, MavenPom, ParentPom, PomDependencies, PomDependency,
     };
-
-    #[test]
-    fn test_parse() {
-        println!(
-            "{:#?}",
-            MavenPom::parse(
-                r#"<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
-<modelVersion>4.0.0</modelVersion>
-<parent>
-<groupId>org.apache.logging.log4j</groupId>
-<artifactId>log4j</artifactId>
-<version>2.14.1</version>
-<relativePath>../</relativePath>
-</parent>
-<artifactId>log4j-api</artifactId>
-<packaging>jar</packaging>
-<name>Apache Log4j API</name>
-<description>The Apache Log4j API</description>
-<properties>
-<log4jParentDir>${basedir}/..</log4jParentDir>
-<docLabel>API Documentation</docLabel>
-<projectDir>/api</projectDir>
-<maven.doap.skip>true</maven.doap.skip>
-</properties>
-<dependencies>
-<dependency>
-<groupId>org.apache.logging.log4j</groupId>
-<artifactId>log4j-api-java9</artifactId>
-<scope>provided</scope>
-<type>zip</type>
-</dependency>
-<!--
- Place Felix before Equinox because Felix is signed. / also place it before org.osgi.core so that its versions of the OSGi classes are used 
--->
-<dependency>
-<groupId>org.apache.felix</groupId>
-<artifactId>org.apache.felix.framework</artifactId>
-<scope>test</scope>
-</dependency>
-<dependency>
-<groupId>org.osgi</groupId>
-<artifactId>org.osgi.core</artifactId>
-<scope>provided</scope>
-</dependency>
-<dependency>
-<groupId>org.junit.vintage</groupId>
-<artifactId>junit-vintage-engine</artifactId>
-</dependency>
-</dependencies></project>"#,
-            )
-                .expect("Can't parse pom")
-        );
-    }
 
     #[test]
     fn test_ser() {
@@ -175,7 +141,7 @@ mod tests {
                     group_id: "marais".into(),
                     artifact_id: "jcargo".into(),
                     version: "0.1.0".into(),
-                    relative_path: "".into(),
+                    //relative_path: None,
                 }),
                 properties: Some([("a".to_string(), "b".to_string())].into_iter().collect()),
                 dependencies: Some(PomDependencies {
@@ -200,5 +166,50 @@ mod tests {
             })
             .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_deser_real0() -> Result<()> {
+        let pom = reqwest::get("https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j-api/2.14.1/log4j-api-2.14.1.pom")
+            .await?
+            .text()
+            .await?;
+        let pom = MavenPom::parse(&pom)?;
+        println!("parsed pom {:#?}", pom);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deser_real1() -> Result<()> {
+        let pom = reqwest::get("https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j/2.14.1/log4j-2.14.1.pom")
+            .await?
+            .text()
+            .await?;
+        let pom = MavenPom::parse(&pom)?;
+        println!("parsed pom {:#?}", pom);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deser_real2() -> Result<()> {
+        let pom = reqwest::get("https://repo.maven.apache.org/maven2/org/apache/logging/logging-parent/3/logging-parent-3.pom")
+            .await?
+            .text()
+            .await?;
+        let pom = MavenPom::parse(&pom)?;
+        println!("parsed pom {:#?}", pom);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deser_real3() -> Result<()> {
+        let pom =
+            reqwest::get("https://repo.maven.apache.org/maven2/org/apache/apache/23/apache-23.pom")
+                .await?
+                .text()
+                .await?;
+        let pom = MavenPom::parse(&pom)?;
+        println!("parsed pom {:#?}", pom);
+        Ok(())
     }
 }
