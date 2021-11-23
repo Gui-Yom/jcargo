@@ -2,6 +2,19 @@
 
 Trying to remake Rust's excellent build tool for the JVM ecosystem.
 
+## Motivations
+
+Maven is awful, who wants to write xml. Gradle is a step in the right direction, but you need a
+degree to use it (and it requires a damn daemon to hide the fact that it is painfully slow).
+
+Jcargo doesn't run on the JVM, it doesn't suffer long boot times (essential for a CLI). It comes
+with another project of mine : https://github.com/Gui-Yom/native-jdktools, an attempt at compiling
+the jdk tools (javac, javadoc, jar ...) with GraalVM to improve boot times.
+
+Jcargo is configured from a single `jcargo.toml` file that is simple to write and to read. It
+follows the principle of "Simple and efficient enough for 90% of use cases", for the remaining 10%
+we may need a build script or something (to be explored later).
+
 ## Installation
 
 ### Download a prebuilt binary
