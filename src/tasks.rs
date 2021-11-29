@@ -152,7 +152,7 @@ pub async fn build(module: &Module, backend: JavaCompilationBackend) {
     // Javac can't handle kotlin source files
     // Required for Java <-> Kotlin references
 
-    let mut sources = collect_files(&source_dir, Some(&[".kt", ".java"])).peekable();
+    let mut sources = collect_files(&source_dir, Some(&[".kt"])).peekable();
     // Pass if no kotlin sources
     if sources.peek().is_some() {
         println!("Detected kotlin sources ...");
@@ -179,7 +179,7 @@ pub async fn build(module: &Module, backend: JavaCompilationBackend) {
         ktcmd.arg(&cp);
         println!("compile classpath: {}", &cp);
 
-        sources.for_each(|it| {
+        collect_files(&source_dir, Some(&[".kt", ".java"])).for_each(|it| {
             ktcmd.arg(it);
         });
 
