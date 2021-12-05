@@ -4,7 +4,7 @@ use std::ops::Deref;
 use regex::Captures;
 
 use crate::dependencies::mavenpom::{
-    Element, MavenPom, PomDependencies, PomDependency, Properties,
+    DependencyManagement, Element, MavenPom, PomDependencies, PomDependency, Properties,
 };
 
 pub struct PomCache {
@@ -36,23 +36,46 @@ impl PomCache {
 }
 
 pub fn merge_poms(parent: &MavenPom, child: &MavenPom) -> MavenPom {
-    let deps = if let Some(pdeps) = parent.dependencies.as_ref() {
-        if let Some(cdeps) = child.dependencies.as_ref() {
-            Some(merge_dependencies(pdeps, cdeps))
+    let props = if let Some(p) = parent.properties.as_ref() {
+        if let Some(c) = child.properties.as_ref() {
+            Some(merge_properties(p, c))
         } else {
-            Some(pdeps.clone())
+            Some(p.clone())
         }
     } else {
-        None
+        if let Some(c) = child.properties.as_ref() {
+            Some(c.clone())
+        } else {
+            None
+        }
     };
-    let props = if let Some(pprops) = parent.properties.as_ref() {
-        if let Some(cprops) = child.properties.as_ref() {
-            Some(merge_properties(pprops, cprops))
+
+    let deps = if let Some(p) = parent.dependencies.as_ref() {
+        if let Some(c) = child.dependencies.as_ref() {
+            Some(merge_dependencies(p, c))
         } else {
-            Some(pprops.clone())
+            Some(p.clone())
         }
     } else {
-        None
+        if let Some(c) = child.dependencies.as_ref() {
+            Some(c.clone())
+        } else {
+            None
+        }
+    };
+
+    let dep_mgmt = if let Some(p) = parent.dependency_management.as_ref() {
+        if let Some(c) = child.dependency_management.as_ref() {
+            Some(merge_dep_mgmt(p, c))
+        } else {
+            Some(p.clone())
+        }
+    } else {
+        if let Some(c) = child.dependency_management.as_ref() {
+            Some(c.clone())
+        } else {
+            None
+        }
     };
 
     MavenPom {
@@ -64,7 +87,7 @@ pub fn merge_poms(parent: &MavenPom, child: &MavenPom) -> MavenPom {
         parent: None,
         properties: props,
         dependencies: deps,
-        dependency_management: None,
+        dependency_management: dep_mgmt,
     }
 }
 
@@ -104,6 +127,15 @@ fn merge_properties(pprops: &Properties, cprops: &Properties) -> Properties {
         props.insert(k.clone(), v.clone());
     }
     props
+}
+
+fn merge_dep_mgmt(
+    pdep_mgmt: &DependencyManagement,
+    cdep_mgmt: &DependencyManagement,
+) -> DependencyManagement {
+    DependencyManagement {
+        dependencies: merge_dependencies(&pdep_mgmt.dependencies, &cdep_mgmt.dependencies),
+    }
 }
 
 #[cfg(test)]
