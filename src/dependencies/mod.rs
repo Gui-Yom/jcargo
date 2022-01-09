@@ -93,14 +93,14 @@ impl Dependency {
         Self::MavenRepo(MavenRepoDependency {
             group: dd.group,
             artifact: dd.artifact,
-            version: Version::new(first.major, first.minor.unwrap(), first.patch.unwrap()),
+            version: first.to_string()[1..].to_string(),
             repo: Arc::clone(&env.repos[0]),
         })
     }
 
     pub fn classpath(&self) -> String {
         match self {
-            Dependency::MavenRepo(repodep) => format!("libs/{}", repodep.get_jar_name()),
+            Dependency::MavenRepo(repodep) => format!("libs/{}", repodep.jar_name()),
             _ => todo!(),
         }
     }
@@ -116,7 +116,7 @@ pub struct MavenRepo {
 pub struct MavenRepoDependency {
     pub group: String,
     pub artifact: String,
-    pub version: Version,
+    pub version: String,
     pub repo: Arc<MavenRepo>,
 }
 
@@ -130,16 +130,16 @@ impl MavenRepoDependency {
         )
     }
 
-    pub fn get_base_name(&self) -> String {
+    pub fn base_name(&self) -> String {
         format!("{}-{}", self.artifact, self.version)
     }
 
-    pub fn get_jar_name(&self) -> String {
-        format!("{}.jar", self.get_base_name())
+    pub fn jar_name(&self) -> String {
+        format!("{}.jar", self.base_name())
     }
 
-    pub fn get_pom_name(&self) -> String {
-        format!("{}.pom", self.get_base_name())
+    pub fn pom_name(&self) -> String {
+        format!("{}.pom", self.base_name())
     }
 
     pub fn jar_url(&self) -> Url {
@@ -147,7 +147,7 @@ impl MavenRepoDependency {
             .url
             .join(&self.get_path())
             .unwrap()
-            .join(&self.get_jar_name())
+            .join(&self.jar_name())
             .unwrap()
     }
 
@@ -156,7 +156,7 @@ impl MavenRepoDependency {
             .url
             .join(&self.get_path())
             .unwrap()
-            .join(&format!("{}-sources.jar", self.get_base_name()))
+            .join(&format!("{}-sources.jar", self.base_name()))
             .unwrap()
     }
 
@@ -165,7 +165,7 @@ impl MavenRepoDependency {
             .url
             .join(&self.get_path())
             .unwrap()
-            .join(&format!("{}-javadoc.jar", self.get_base_name()))
+            .join(&format!("{}-javadoc.jar", self.base_name()))
             .unwrap()
     }
 
@@ -174,8 +174,12 @@ impl MavenRepoDependency {
             .url
             .join(&self.get_path())
             .unwrap()
-            .join(&self.get_pom_name())
+            .join(&self.pom_name())
             .unwrap()
+    }
+
+    pub fn dependency_notation(&self) -> String {
+        format!("{}:{}:{}", self.group, self.artifact, self.version)
     }
 }
 

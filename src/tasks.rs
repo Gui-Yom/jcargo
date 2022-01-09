@@ -7,13 +7,15 @@ use std::time::Instant;
 
 use anyhow::Result;
 use reqwest::Client;
+use semver::{Version, VersionReq};
 use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::sync::Mutex;
 use tokio::{fs, process};
 use walkdir::WalkDir;
 
 use crate::backend::{DocumentationBackend, KotlinCompilationBackend};
 use crate::dependencies::mavenpom::MavenPom;
-use crate::dependencies::Dependency;
+use crate::dependencies::{Dependency, MavenRepoDependency};
 use crate::download::{download_file, download_memory_and_file};
 use crate::{Env, JavaCompilationBackend, Module, PackageBackend, Runtime, Task};
 
@@ -460,9 +462,22 @@ async fn setup_all_dependencies(module: &Module) {
     let client_ = Arc::new(reqwest::Client::new());
 
     let mut handles = Vec::with_capacity(module.dependencies.len());
-    for dep_ in module.dependencies.iter() {
+
+    // Simple way to not download a dependency twice while exploring the dependency graph
+    let processed = Arc::new(Mutex::new(Vec::new()));
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Dependency>();
+
+    // Initialize work queue
+    for dep in module.dependencies.iter() {
+        tx.send(dep.clone());
+    }
+
+    while let Some(dep) = rx.recv().await {
         // Manually clone
-        let dep = dep_.clone();
+        let processed = Arc::clone(&processed);
+        let tx = tx.clone();
+        //let dep = dep_.clone();
         let client = Arc::clone(&client_);
         let dir = module.dir.join("libs");
         fs::create_dir_all(&dir).await.unwrap();
@@ -481,58 +496,79 @@ async fn setup_all_dependencies(module: &Module) {
         2. Download all jars (cached)
          */
 
-        let task =
-            tokio::spawn(
-                async move { subtask_setup_dependency(client.as_ref(), &dir, &dep).await },
-            );
+        let task = tokio::spawn(async move {
+            match dep {
+                Dependency::MavenRepo(repodep) => {
+                    {
+                        let mut guard = processed.lock().await;
+                        let key = repodep.dependency_notation();
+                        if guard.contains(&key) {
+                            println!("Already processed by another task");
+                            return;
+                        } else {
+                            guard.push(key);
+                        }
+                    }
+
+                    let file_path = dir.join(&repodep.pom_name());
+
+                    if !file_path.exists() {
+                        println!("Downloading '{}' (pom) from {}", repodep, repodep.repo.name);
+
+                        let url = repodep.pom_url();
+                        //dbg!(&url);
+                        let raw = download_memory_and_file(&client, url, &file_path)
+                            .await
+                            .unwrap();
+                        let pom = MavenPom::parse(&raw).unwrap();
+                        if let Some(parent) = pom.parent {
+                            println!("Should download parent pom : {:#?}", parent);
+
+                            tx.send(Dependency::MavenRepo(MavenRepoDependency {
+                                group: parent.group_id.value,
+                                artifact: parent.artifact_id.value,
+                                version: parent.version.value,
+                                repo: Arc::clone(&repodep.repo),
+                            }))
+                            .unwrap();
+                        }
+                        /*
+                        if let Some(deps) = pom.dependencies {
+                            for dep in deps.dependencies {
+                                println!("Should download dependency : {:#?}", dep);
+                                tx.send(Dependency::MavenRepo(MavenRepoDependency {
+                                    group: dep.group_id.value,
+                                    artifact: dep.artifact_id.value,
+                                    version: Version::parse(&dep.version.unwrap().value).unwrap(),
+                                    repo: Arc::clone(&repodep.repo),
+                                }))
+                                .unwrap();
+                            }
+                        }*/
+                    }
+
+                    /*
+                    let file_path = dir.join(&repodep.get_jar_name());
+
+                    if !file_path.exists() {
+                        println!("Downloading '{}' (jar) from {}", repodep, repodep.repo.name);
+
+                        let url = repodep.jar_url();
+                        //dbg!(&url);
+                        download_file(&client, url, &file_path).await.unwrap();
+                    }
+
+                    println!("Dependency '{}' OK", repodep);*/
+                }
+                _ => {
+                    todo!("Dependencies other than maven")
+                }
+            }
+        });
         handles.push(task);
     }
     for x in handles {
         x.await.expect("Error when waiting for dependency setup");
-    }
-}
-
-#[async_recursion::async_recursion]
-async fn subtask_setup_dependency(client: &Client, dir: &Path, dep: &Dependency) {
-    match dep {
-        Dependency::MavenRepo(repodep) => {
-            // TODO download dependencies to a known place
-            // TODO verify file hash for update
-
-            let file_path = dir.join(&repodep.get_pom_name());
-
-            if !file_path.exists() {
-                println!("Downloading '{}' (pom) from {}", repodep, repodep.repo.name);
-
-                let url = repodep.pom_url();
-                //dbg!(&url);
-                let raw = download_memory_and_file(client, url, &file_path)
-                    .await
-                    .unwrap();
-                let pom = MavenPom::parse(&raw).unwrap();
-                if let Some(parent) = pom.parent.as_ref() {
-                    println!("Should download parent pom : {:#?}", parent);
-                }
-                if let Some(deps) = pom.dependencies.as_ref() {
-                    println!("Should download dependencies : {:#?}", deps);
-                }
-            }
-
-            let file_path = dir.join(&repodep.get_jar_name());
-
-            if !file_path.exists() {
-                println!("Downloading '{}' (jar) from {}", repodep, repodep.repo.name);
-
-                let url = repodep.jar_url();
-                //dbg!(&url);
-                download_file(client, url, &file_path).await.unwrap();
-            }
-
-            println!("Dependency '{}' OK", repodep);
-        }
-        _ => {
-            todo!("Dependencies other than maven")
-        }
     }
 }
 
