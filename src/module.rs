@@ -3,9 +3,15 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use tokio::fs;
 
-use crate::dependencies::Dependencies;
+use crate::dependencies::{Dependencies, Dependency};
 use crate::manifest::{EntrypointDef, ModuleManifest};
 use crate::Env;
+
+pub struct CompilationUnit {
+    pub name: String,
+    pub sources: PathBuf,
+    pub dependencies: Vec<Dependency>,
+}
 
 #[derive(Debug)]
 pub struct Module {

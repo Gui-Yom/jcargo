@@ -7,8 +7,8 @@ use url::Url;
 use crate::manifest::{CompleteDependencyDef, DependenciesDef};
 use crate::Env;
 
-pub mod maven;
 pub mod mavenpom;
+pub mod pomcache;
 
 #[derive(Debug, Clone)]
 pub struct Dependencies {
@@ -78,20 +78,19 @@ impl Dependencies {
 #[derive(Debug, Clone)]
 pub enum Dependency {
     /// Dependency on a library from a maven repo
-    Repo(RepoDependency),
+    MavenRepo(MavenRepoDependency),
     /// Dependency on another jcargo project in a git repository
-    Git(GitDependency),
+    JcargoGit(JcargoGitDependency),
     /// Dependency on another local jcargo project
-    Project(ProjectDependency),
-    /// Dependency on an external project
-    /// Point directly to the compiled classes / jar
-    External(ExternalDependency),
+    JcargoLocal(JcargoLocalDependency),
+    /// Dependency on a local compiled jar
+    PrebuiltLocal(PrebuiltLocalDependency),
 }
 
 impl Dependency {
     pub fn from_def(dd: CompleteDependencyDef, env: &Env) -> Self {
         let first = dd.version.comparators.first().unwrap();
-        Self::Repo(RepoDependency {
+        Self::MavenRepo(MavenRepoDependency {
             group: dd.group,
             artifact: dd.artifact,
             version: Version::new(first.major, first.minor.unwrap(), first.patch.unwrap()),
@@ -101,7 +100,7 @@ impl Dependency {
 
     pub fn classpath(&self) -> String {
         match self {
-            Dependency::Repo(repodep) => format!("libs/{}", repodep.get_file_name()),
+            Dependency::MavenRepo(repodep) => format!("libs/{}", repodep.get_jar_name()),
             _ => todo!(),
         }
     }
@@ -114,14 +113,14 @@ pub struct MavenRepo {
 }
 
 #[derive(Debug, Clone)]
-pub struct RepoDependency {
+pub struct MavenRepoDependency {
     pub group: String,
     pub artifact: String,
     pub version: Version,
     pub repo: Arc<MavenRepo>,
 }
 
-impl RepoDependency {
+impl MavenRepoDependency {
     pub fn get_path(&self) -> String {
         format!(
             "{}/{}/{}/",
@@ -135,8 +134,12 @@ impl RepoDependency {
         format!("{}-{}", self.artifact, self.version)
     }
 
-    pub fn get_file_name(&self) -> String {
+    pub fn get_jar_name(&self) -> String {
         format!("{}.jar", self.get_base_name())
+    }
+
+    pub fn get_pom_name(&self) -> String {
+        format!("{}.pom", self.get_base_name())
     }
 
     pub fn jar_url(&self) -> Url {
@@ -144,7 +147,7 @@ impl RepoDependency {
             .url
             .join(&self.get_path())
             .unwrap()
-            .join(&self.get_file_name())
+            .join(&self.get_jar_name())
             .unwrap()
     }
 
@@ -171,19 +174,19 @@ impl RepoDependency {
             .url
             .join(&self.get_path())
             .unwrap()
-            .join(&format!("{}.pom", self.get_base_name()))
+            .join(&self.get_pom_name())
             .unwrap()
     }
 }
 
-impl Display for RepoDependency {
+impl Display for MavenRepoDependency {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}:{}", self.group, self.artifact, self.version)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct GitDependency {
+pub struct JcargoGitDependency {
     /// Repository url
     url: String,
     /// Repo branch or tag
@@ -197,11 +200,11 @@ pub struct GitDependency {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProjectDependency {
+pub struct JcargoLocalDependency {
     path: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct ExternalDependency {
+pub struct PrebuiltLocalDependency {
     path: String,
 }

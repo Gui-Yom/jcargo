@@ -26,3 +26,26 @@ pub async fn download_file(client: &Client, url: Url, path: impl AsRef<Path>) ->
         Err(anyhow!("Url is probably incorrect"))
     }
 }
+
+pub async fn download_memory_and_file(
+    client: &Client,
+    url: Url,
+    path: impl AsRef<Path>,
+) -> Result<String> {
+    let mut res = client.get(url).send().await?;
+
+    if res.status().is_success() {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .await?;
+        let text = res.text().await?;
+        file.write_all(text.as_bytes()).await?;
+        file.flush().await?;
+        Ok(text)
+    } else {
+        Err(anyhow!("Url is probably incorrect"))
+    }
+}

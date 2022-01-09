@@ -22,6 +22,7 @@ lto = "thin"
 anyhow = "1"
 async-recursion = "1"
 quick-xml = { version = "0.22", features = ["serialize"] }
+lazy-regex = "2"
 regex = "1"
 reqwest = { version = "0.11", features = ["stream"] }
 semver = { version = "1", features = ["serde"] }

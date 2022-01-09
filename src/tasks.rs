@@ -6,13 +6,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use reqwest::Client;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::{fs, process};
 use walkdir::WalkDir;
 
 use crate::backend::{DocumentationBackend, KotlinCompilationBackend};
+use crate::dependencies::mavenpom::MavenPom;
 use crate::dependencies::Dependency;
-use crate::download::download_file;
+use crate::download::{download_file, download_memory_and_file};
 use crate::{Env, JavaCompilationBackend, Module, PackageBackend, Runtime, Task};
 
 pub async fn execute_task(
@@ -465,38 +467,72 @@ async fn setup_all_dependencies(module: &Module) {
         let dir = module.dir.join("libs");
         fs::create_dir_all(&dir).await.unwrap();
 
-        let task = tokio::spawn(async move {
-            match dep {
-                Dependency::Repo(repodep) => {
-                    // TODO download dependencies to a known place
-                    // TODO verify file hash for update
+        /*
+        How to setup maven dependencies :
+        1. Recursively download poms + parent poms
+            - Root poms (cached)
+            - Parent poms (cached)
+            - Merge poms with parent (exclude unwanted scopes)
+            - Apply dependency rules (dep management)
+            - Apply properties
+            - dependencies pom (cached)
+            - repeat until end of tree
+        1.1. Cache everything in a better format
+        2. Download all jars (cached)
+         */
 
-                    let file_path = dir.join(&repodep.get_file_name());
-
-                    if file_path.exists() {
-                        println!("Dependency '{}' OK", repodep);
-                        return;
-                    }
-
-                    println!("Downloading '{}' from {}", repodep, repodep.repo.name);
-
-                    let url = repodep.jar_url();
-                    //dbg!(&url);
-                    download_file(client.as_ref(), url, &file_path)
-                        .await
-                        .unwrap();
-
-                    println!("Downloaded {}", repodep);
-                }
-                _ => {
-                    todo!()
-                }
-            }
-        });
+        let task =
+            tokio::spawn(
+                async move { subtask_setup_dependency(client.as_ref(), &dir, &dep).await },
+            );
         handles.push(task);
     }
     for x in handles {
         x.await.expect("Error when waiting for dependency setup");
+    }
+}
+
+#[async_recursion::async_recursion]
+async fn subtask_setup_dependency(client: &Client, dir: &Path, dep: &Dependency) {
+    match dep {
+        Dependency::MavenRepo(repodep) => {
+            // TODO download dependencies to a known place
+            // TODO verify file hash for update
+
+            let file_path = dir.join(&repodep.get_pom_name());
+
+            if !file_path.exists() {
+                println!("Downloading '{}' (pom) from {}", repodep, repodep.repo.name);
+
+                let url = repodep.pom_url();
+                //dbg!(&url);
+                let raw = download_memory_and_file(client, url, &file_path)
+                    .await
+                    .unwrap();
+                let pom = MavenPom::parse(&raw).unwrap();
+                if let Some(parent) = pom.parent.as_ref() {
+                    println!("Should download parent pom : {:#?}", parent);
+                }
+                if let Some(deps) = pom.dependencies.as_ref() {
+                    println!("Should download dependencies : {:#?}", deps);
+                }
+            }
+
+            let file_path = dir.join(&repodep.get_jar_name());
+
+            if !file_path.exists() {
+                println!("Downloading '{}' (jar) from {}", repodep, repodep.repo.name);
+
+                let url = repodep.jar_url();
+                //dbg!(&url);
+                download_file(client, url, &file_path).await.unwrap();
+            }
+
+            println!("Dependency '{}' OK", repodep);
+        }
+        _ => {
+            todo!("Dependencies other than maven")
+        }
     }
 }
 
