@@ -1,0 +1,35 @@
+group = "marais"
+artifact = "testproject"
+version = "0.1.0"
+
+[main]
+dependencies = [# Table for sources sets, but array for dependencies
+    "org.apache.logging.log4j:log4j-api:2.17.1", # Defaults to compile + runtime
+    { notation = "org.apache.logging.log4j:log4j-api:2.17.1", compile = true, runtime = true }
+]
+
+[main.dependencies] # Table for source sets and table for dependencies
+"org.apache.logging.log4j:log4j-api" = { version = "2.17.1", compile = true, runtime = true, transitive = false }
+
+[main.dependencies] # Table for sources sets and table for scopes
+# Compile and runtime dependencies
+compileRuntime = [
+    "org.apache.logging.log4j:log4j-api:2.17.1"
+]
+# Runtime only dependencies
+runtime = [
+    { group = "org.apache.logging.log4j", artifact = "log4j-core", version = "2.17.1" }
+]
+# Compile only
+compile = []
+transitive = []
+
+[[main.entrypoints]]
+class = "Main"
+
+[[main.entrypoints]]
+name = "Other"
+class = "OtherMain"
+
+[[examples.entrypoints]]
+class = "Example"

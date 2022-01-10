@@ -83,6 +83,46 @@ name = "Other"
 class = "OtherMain"
 ```
 
+### Dependencies configuration
+
+Explored configuration structures :
+
+```toml
+# Table for sources sets, but array for dependencies
+[main]
+dependencies = [
+    "org.apache.logging.log4j:log4j-api:2.17.1", # Defaults to compile + runtime
+    { notation = "org.apache.logging.log4j:log4j-api:2.17.1", compile = true, runtime = true }
+]
+```
+
+```toml
+# Table for source sets and table for dependencies
+# Similar to what cargo does
+[main.dependencies]
+"org.apache.logging.log4j:log4j-api" = { version = "2.17.1", compile = true, runtime = true, transitive = false }
+
+[test.dependencies]
+"org.junit:junit" = "5"
+
+# We can't do this, this isn't valid toml
+[dependencies.example]
+"group:a:1"
+"group:b:1"
+```
+
+```toml
+# Table for sources sets and table for scopes
+[main.dependencies]
+compileRuntime = [
+    "org.apache.logging.log4j:log4j-api:2.17.1"
+]
+runtime = [
+    { group = "org.apache.logging.log4j", artifact = "log4j-core", version = "2.17.1" }
+]
+compile = []
+```
+
 ## Roadmap for 1.0
 
 - [x] means a feature is partially implemented, not completely finished
