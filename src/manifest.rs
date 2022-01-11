@@ -11,7 +11,7 @@ pub struct ModuleManifest {
     pub version: String,
     #[serde(flatten)]
     pub extra_info: ExtraInfo,
-    // May be a library
+    // May be a library without entrypoints
     #[serde(default)]
     pub entrypoints: Vec<EntrypointDef>,
     // No dependencies is ok

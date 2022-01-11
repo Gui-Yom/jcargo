@@ -102,6 +102,15 @@ impl MavenPom {
         Ok(pom)
     }
 
+    pub fn dependency_notation(&self) -> String {
+        return format!(
+            "{}:{}:{}",
+            self.group_id.as_ref().unwrap().value,
+            self.artifact_id.value,
+            self.version.as_ref().unwrap().value
+        );
+    }
+
     /// Get a new pom by applying a child pom over a parent pom
     pub fn merge(&self, new: &MavenPom) -> MavenPom {
         let props = if let Some(p) = self.properties.as_ref() {
@@ -169,6 +178,15 @@ pub struct ParentPom {
     pub version: Element,
     //#[serde(rename = "relativePath")]
     //pub relative_path: Option<Element>,
+}
+
+impl ParentPom {
+    pub fn dependency_notation(&self) -> String {
+        return format!(
+            "{}:{}:{}",
+            self.group_id.value, self.artifact_id.value, self.version.value
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -243,6 +261,15 @@ pub struct PomDependency {
 }
 
 impl PomDependency {
+    pub fn dependency_notation(&self) -> String {
+        return format!(
+            "{}:{}:{}",
+            self.group_id.value,
+            self.artifact_id.value,
+            self.version.as_ref().unwrap().value
+        );
+    }
+
     /// Merge 2 dependencies (they should be the same group:artifact)
     /// Apply new onto self
     pub fn merge(&self, new: &PomDependency) -> PomDependency {

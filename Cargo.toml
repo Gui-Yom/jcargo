@@ -20,6 +20,7 @@ lto = "thin"
 
 [dependencies]
 anyhow = "1"
+async-oncecell = "0.2"
 async-recursion = "1"
 quick-xml = { version = "0.22", features = ["serialize"] }
 lazy-regex = "2"

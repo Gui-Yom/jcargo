@@ -1,14 +1,14 @@
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-use semver::Version;
 use url::Url;
 
 use crate::manifest::{CompleteDependencyDef, DependenciesDef};
 use crate::Env;
 
+pub mod dependency_graph;
+pub mod maven;
 pub mod mavenpom;
-pub mod pomcache;
 
 #[derive(Debug, Clone)]
 pub struct Dependencies {

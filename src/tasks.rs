@@ -6,17 +6,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
-use reqwest::Client;
-use semver::{Version, VersionReq};
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio::{fs, process};
 use walkdir::WalkDir;
 
 use crate::backend::{DocumentationBackend, KotlinCompilationBackend};
-use crate::dependencies::mavenpom::MavenPom;
-use crate::dependencies::{Dependency, MavenRepoDependency};
-use crate::download::{download_file, download_memory_and_file};
+use crate::dependencies::dependency_graph::DependencyGraph;
+use crate::dependencies::maven::explore_dependency;
+use crate::dependencies::Dependency;
 use crate::{Env, JavaCompilationBackend, Module, PackageBackend, Runtime, Task};
 
 pub async fn execute_task(
@@ -457,118 +455,55 @@ fn collect_files<P: AsRef<Path>>(
         .map(|it| it.path().to_path_buf())
 }
 
+/*
+How to setup maven dependencies :
+1. Recursively download poms + parent poms
+    - Root poms (cached)
+    - Parent poms (cached)
+    - Merge poms with parent (exclude unwanted scopes)
+    - Apply dependency rules (dep management)
+    - Apply properties
+    - dependencies pom (cached)
+    - repeat until end of tree
+1.1. Cache everything in a better format
+2. Download all jars (cached)
+ */
+
 /// Setup all dependencies from any scope
 async fn setup_all_dependencies(module: &Module) {
-    let client_ = Arc::new(reqwest::Client::new());
+    let client = reqwest::Client::new();
 
-    let mut handles = Vec::with_capacity(module.dependencies.len());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<JoinHandle<Result<()>>>();
 
-    // Simple way to not download a dependency twice while exploring the dependency graph
-    let processed = Arc::new(Mutex::new(Vec::new()));
+    let dir = module.dir.join("libs");
+    fs::create_dir_all(&dir).await.unwrap();
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Dependency>();
+    let graph = DependencyGraph::new();
 
-    // Initialize work queue
     for dep in module.dependencies.iter() {
-        tx.send(dep.clone());
-    }
-
-    while let Some(dep) = rx.recv().await {
-        // Manually clone
-        let processed = Arc::clone(&processed);
-        let tx = tx.clone();
-        //let dep = dep_.clone();
-        let client = Arc::clone(&client_);
-        let dir = module.dir.join("libs");
-        fs::create_dir_all(&dir).await.unwrap();
-
-        /*
-        How to setup maven dependencies :
-        1. Recursively download poms + parent poms
-            - Root poms (cached)
-            - Parent poms (cached)
-            - Merge poms with parent (exclude unwanted scopes)
-            - Apply dependency rules (dep management)
-            - Apply properties
-            - dependencies pom (cached)
-            - repeat until end of tree
-        1.1. Cache everything in a better format
-        2. Download all jars (cached)
-         */
-
-        let task = tokio::spawn(async move {
-            match dep {
-                Dependency::MavenRepo(repodep) => {
-                    {
-                        let mut guard = processed.lock().await;
-                        let key = repodep.dependency_notation();
-                        if guard.contains(&key) {
-                            println!("Already processed by another task");
-                            return;
-                        } else {
-                            guard.push(key);
-                        }
-                    }
-
-                    let file_path = dir.join(&repodep.pom_name());
-
-                    if !file_path.exists() {
-                        println!("Downloading '{}' (pom) from {}", repodep, repodep.repo.name);
-
-                        let url = repodep.pom_url();
-                        //dbg!(&url);
-                        let raw = download_memory_and_file(&client, url, &file_path)
-                            .await
-                            .unwrap();
-                        let pom = MavenPom::parse(&raw).unwrap();
-                        if let Some(parent) = pom.parent {
-                            println!("Should download parent pom : {:#?}", parent);
-
-                            tx.send(Dependency::MavenRepo(MavenRepoDependency {
-                                group: parent.group_id.value,
-                                artifact: parent.artifact_id.value,
-                                version: parent.version.value,
-                                repo: Arc::clone(&repodep.repo),
-                            }))
-                            .unwrap();
-                        }
-                        /*
-                        if let Some(deps) = pom.dependencies {
-                            for dep in deps.dependencies {
-                                println!("Should download dependency : {:#?}", dep);
-                                tx.send(Dependency::MavenRepo(MavenRepoDependency {
-                                    group: dep.group_id.value,
-                                    artifact: dep.artifact_id.value,
-                                    version: Version::parse(&dep.version.unwrap().value).unwrap(),
-                                    repo: Arc::clone(&repodep.repo),
-                                }))
-                                .unwrap();
-                            }
-                        }*/
-                    }
-
-                    /*
-                    let file_path = dir.join(&repodep.get_jar_name());
-
-                    if !file_path.exists() {
-                        println!("Downloading '{}' (jar) from {}", repodep, repodep.repo.name);
-
-                        let url = repodep.jar_url();
-                        //dbg!(&url);
-                        download_file(&client, url, &file_path).await.unwrap();
-                    }
-
-                    println!("Dependency '{}' OK", repodep);*/
-                }
-                _ => {
-                    todo!("Dependencies other than maven")
-                }
+        match dep {
+            Dependency::MavenRepo(repodep) => {
+                tx.send(tokio::spawn(explore_dependency(
+                    client.clone(),
+                    graph.clone(),
+                    dir.clone(),
+                    repodep.clone(),
+                    tx.clone(),
+                )))
+                .unwrap();
             }
-        });
-        handles.push(task);
+            _ => {
+                todo!("Other than maven deps");
+            }
+        }
     }
-    for x in handles {
-        x.await.expect("Error when waiting for dependency setup");
+    // Drop the initial tx so we don't block indefinitely on recv
+    drop(tx);
+
+    while let Some(t) = rx.recv().await {
+        t.await
+            .expect("Error when joining dependency setup worker")
+            .expect("Error in sub task");
     }
 }
 
