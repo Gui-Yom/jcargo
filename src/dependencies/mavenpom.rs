@@ -47,17 +47,30 @@ pub type Properties = HashMap<String, String>;
 
 pub trait PropertiesExt {
     /// Recursively resolve properties in the given text
-    fn recurse_resolve<'t>(&self, text: &'t str) -> Cow<'t, str>;
+    fn recurse_resolve<'t>(&self, text: &'t str, project_version: &str) -> Cow<'t, str>;
 
     fn merge(&self, other: &Properties) -> Properties;
 }
 
 impl PropertiesExt for Properties {
-    fn recurse_resolve<'t>(&self, text: &'t str) -> Cow<'t, str> {
+    fn recurse_resolve<'t>(&self, text: &'t str, project_version: &str) -> Cow<'t, str> {
         // Regex is compiled at compile time
         let pat: &Lazy<Regex> = regex!("\\$\\{(?P<prop_name>.+)\\}");
         pat.replace_all(text, |caps: &Captures| {
-            self.recurse_resolve(self.get(caps.name("prop_name").unwrap().as_str()).unwrap())
+            let prop = caps.name("prop_name").unwrap().as_str();
+
+            // project.version is defined by maven
+            if prop == "project.version" {
+                return Cow::Borrowed(project_version);
+            }
+
+            let res = self.get(prop);
+            if res.is_none() {
+                println!("Can't resolve {}", text);
+                return Cow::Borrowed(text);
+            } else {
+                return self.recurse_resolve(res.unwrap(), project_version);
+            }
         })
     }
 
@@ -167,6 +180,30 @@ impl MavenPom {
             dependency_management: dep_mgmt,
         }
     }
+
+    /// Remove unneeded dependencies (e.g. test scope)
+    pub fn clean(&mut self) {
+        if let Some(deps) = self.dependencies.as_mut() {
+            if let Some(mgmt) = self.dependency_management.as_ref() {
+                deps.apply_rules(mgmt);
+            }
+            deps.clean();
+            if let Some(props) = self.properties.as_ref() {
+                for dep in deps.dependencies.iter_mut() {
+                    if let Some(x) = dep.version.as_mut() {
+                        x.value = props
+                            .recurse_resolve(
+                                &x.value,
+                                self.version.as_ref().map(|e| &e.value).unwrap(),
+                            )
+                            .into_owned();
+                    }
+                }
+            }
+        }
+        self.properties = None;
+        self.dependency_management = None;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -215,37 +252,44 @@ impl PomDependencies {
         dependencies
     }
 
-    pub fn apply_properties(&mut self, properties: &Properties) {
+    pub fn apply_rules(&mut self, rules: &DependencyManagement) {
         for dep in self.dependencies.iter_mut() {
-            if let Some(x) = dep.version.as_mut() {
-                x.value = properties.recurse_resolve(&x.value).into_owned();
-            }
+            *dep = dep.apply_rules(rules);
         }
     }
 
-    pub fn apply_rules(&self, rules: &DependencyManagement) -> PomDependencies {
-        let mut newDeps = PomDependencies {
-            dependencies: Vec::with_capacity(self.dependencies.len()),
-        };
-        for dep in self.dependencies.iter() {
-            newDeps.dependencies.push(dep.apply_rules(rules));
-        }
-        newDeps
+    pub fn clean(&mut self) {
+        self.dependencies.retain(|dep| dep.should_keep());
     }
+}
 
-    pub fn extract_deps(&self) {
-        for dep in self.dependencies.iter() {
-            //println!("Got dep {:#?}", dep);
-            if dep
-                .scope
-                .as_ref()
-                .map(|x| x.value)
-                .unwrap_or(MavenDependencyScope::Compile)
-                == MavenDependencyScope::Compile
-            {
-                println!("kept dep {:#?}", dep);
-            }
-        }
+#[derive(Clone, PartialEq, Default, Deserialize, Serialize)]
+pub struct BoolElement {
+    #[serde(rename = "$value")]
+    pub value: bool,
+}
+
+impl BoolElement {
+    pub fn new(value: bool) -> Self {
+        Self { value }
+    }
+}
+
+impl From<bool> for BoolElement {
+    fn from(v: bool) -> Self {
+        BoolElement::new(v)
+    }
+}
+
+impl Display for BoolElement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl Debug for BoolElement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
     }
 }
 
@@ -258,6 +302,7 @@ pub struct PomDependency {
     pub version: Option<Element>,
     pub scope: Option<DependencyScope>,
     pub r#type: Option<Element>,
+    pub optional: Option<BoolElement>,
 }
 
 impl PomDependency {
@@ -276,9 +321,10 @@ impl PomDependency {
         PomDependency {
             group_id: new.group_id.clone(),
             artifact_id: new.artifact_id.clone(),
-            version: new.version.clone().or(self.version.clone()),
-            scope: new.scope.clone().or(self.scope.clone()),
-            r#type: new.r#type.clone().or(self.r#type.clone()),
+            version: new.version.as_ref().or(self.version.as_ref()).cloned(),
+            scope: new.scope.as_ref().or(self.scope.as_ref()).cloned(),
+            r#type: new.r#type.as_ref().or(self.r#type.as_ref()).cloned(),
+            optional: new.optional.as_ref().or(self.optional.as_ref()).cloned(),
         }
     }
 
@@ -293,28 +339,46 @@ impl PomDependency {
             PomDependency {
                 group_id: self.group_id.clone(),
                 artifact_id: self.artifact_id.clone(),
-                version: self
-                    .version
-                    .as_ref()
-                    .or_else(|| rule.version.as_ref())
-                    .cloned(),
-                scope: self.scope.as_ref().or_else(|| rule.scope.as_ref()).cloned(),
-                r#type: self
-                    .r#type
-                    .as_ref()
-                    .or_else(|| rule.r#type.as_ref())
-                    .cloned(),
+                version: self.version.as_ref().or(rule.version.as_ref()).cloned(),
+                scope: self.scope.as_ref().or(rule.scope.as_ref()).cloned(),
+                r#type: self.r#type.as_ref().or(rule.r#type.as_ref()).cloned(),
+                optional: self.optional.as_ref().or(rule.optional.as_ref()).cloned(),
             }
         } else {
             self.clone()
         }
     }
+
+    /// returns false if this dependency is useless, e.g. test dependency
+    fn should_keep(&self) -> bool {
+        !self.optional.clone().unwrap_or(false.into()).value && {
+            let scope = self
+                .scope
+                .as_ref()
+                .map(|x| x.value)
+                .unwrap_or(MavenDependencyScope::Compile);
+            //println!("dep: {}, scope: {:?}", self.dependency_notation(), scope);
+            scope == MavenDependencyScope::Compile || scope == MavenDependencyScope::Runtime
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Deserialize, Serialize)]
 pub struct DependencyScope {
     #[serde(rename = "$value")]
     pub value: MavenDependencyScope,
+}
+
+impl Display for DependencyScope {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.value)
+    }
+}
+
+impl Debug for DependencyScope {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.value)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
@@ -375,6 +439,7 @@ mod tests {
                             version: None,
                             scope: None,
                             r#type: None,
+                            optional: None,
                         },
                         PomDependency {
                             group_id: "marais".into(),
@@ -382,6 +447,7 @@ mod tests {
                             version: None,
                             scope: None,
                             r#type: None,
+                            optional: None,
                         },
                     ]
                 }),
@@ -392,7 +458,7 @@ mod tests {
     }
 
     async fn pom_source_0() -> Result<String> {
-        Ok(reqwest::get("https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j-api/2.17.1/log4j-api-2.17.1.pom")
+        Ok(reqwest::get("https://repo.maven.apache.org/maven2/org/apache/logging/log4j/log4j-core/2.17.1/log4j-core-2.17.1.pom")
             .await?
             .text()
             .await?)
@@ -458,7 +524,7 @@ mod tests {
         );
         props.insert("other".to_string(), "but it was me dio".to_string());
         assert_eq!(
-            props.recurse_resolve("yay ${propname}").to_string(),
+            props.recurse_resolve("yay ${propname}", "yay").to_string(),
             "yay you thought it was me, but it was me dio".to_string()
         );
         Ok(())

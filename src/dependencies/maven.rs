@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::dependencies::dependency_graph::DependencyGraph;
-use crate::dependencies::mavenpom::MavenPom;
+use crate::dependencies::mavenpom::{DependencyScope, MavenDependencyScope, MavenPom};
 use crate::dependencies::MavenRepoDependency;
 use crate::download::download_memory;
 
@@ -26,30 +26,47 @@ pub async fn explore_dependency(
     client: Client,
     graph: DependencyGraph,
     base_dir: PathBuf,
-    dep: MavenRepoDependency,
+    root: MavenRepoDependency,
     sub_tasks: UnboundedSender<JoinHandle<Result<()>>>,
 ) -> Result<()> {
-    let file_path = base_dir.join(&dep.pom_name());
+    let file_path = base_dir.join(&root.pom_name());
 
     if !file_path.exists() {
-        println!("Exploring root '{}' (pom) from {}", dep, dep.repo.name);
+        println!("Exploring main node '{}'", root);
 
-        let pom = fetch_pom(graph, client.clone(), dep).await?;
-        println!("Downloaded pom : {:#?}", pom.dependency_notation());
+        let repo = Arc::clone(&root.repo);
+        let mut pom = fetch_pom(graph.clone(), client.clone(), root, true).await?;
+        //println!("Downloaded pom : {:#?}", pom);
 
-        /*
         if let Some(deps) = pom.dependencies {
             for dep in deps.dependencies {
-                println!("Should download dependency : {:#?}", dep);
-                MavenRepoDependency {
-                    group: dep.group_id.value,
-                    artifact: dep.artifact_id.value,
-                    version: Version::parse(&dep.version.unwrap().value).unwrap(),
-                    repo: Arc::clone(&repodep.repo),
-                }))
-                .unwrap();
+                /*
+                if let Some(scope) = dep
+                    .scope
+                    .clone()
+                    .map(|s| s.value)
+                    .or(Some(MavenDependencyScope::Compile))
+                {
+                    if scope == MavenDependencyScope::Compile
+                        || scope == MavenDependencyScope::Runtime
+                    {*/
+                println!("Should download dependency : {}", dep.dependency_notation());
+                let repo = Arc::clone(&repo);
+                let task = tokio::spawn(explore_dependency(
+                    client.clone(),
+                    graph.clone(),
+                    base_dir.clone(),
+                    MavenRepoDependency {
+                        group: dep.group_id.value,
+                        artifact: dep.artifact_id.value,
+                        version: dep.version.unwrap().value,
+                        repo,
+                    },
+                    sub_tasks.clone(),
+                ));
+                sub_tasks.send(task);
             }
-        }*/
+        }
     }
 
     /*
@@ -67,17 +84,23 @@ pub async fn explore_dependency(
     Ok(())
 }
 
+/// The returned pom will have all its parents merged.
 #[async_recursion::async_recursion]
 async fn fetch_pom(
     graph: DependencyGraph,
     client: Client,
     dep: MavenRepoDependency,
+    main: bool,
 ) -> Result<MavenPom> {
     let key = dep.dependency_notation();
     let graph_ = graph.clone();
     graph
         .get_or_init(&key, async move {
-            println!("In graph node, downloading {}", dep.dependency_notation());
+            println!(
+                "Running in {} node '{}': downloading pom",
+                if main { "main" } else { "parent" },
+                dep.dependency_notation()
+            );
             let mut pom = MavenPom::parse(&download_memory(&client, dep.pom_url()).await?)?;
             if let Some(parent) = pom.parent.clone() {
                 // Recurse to fetch parent pom
@@ -90,10 +113,14 @@ async fn fetch_pom(
                         version: parent.version.value,
                         repo: Arc::clone(&dep.repo),
                     },
+                    false,
                 )
                 .await?;
                 // Merge current pom with parent
                 pom = parent.merge(&pom);
+                if main {
+                    pom.clean();
+                }
             }
             return Ok(pom);
         })
