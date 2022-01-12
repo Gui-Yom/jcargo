@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::dependencies::dependency_graph::DependencyGraph;
-use crate::dependencies::mavenpom::{DependencyScope, MavenDependencyScope, MavenPom};
+use crate::dependencies::mavenpom::{MavenDependencyScope, MavenPom};
 use crate::dependencies::MavenRepoDependency;
 use crate::download::download_memory;
 
@@ -40,16 +40,6 @@ pub async fn explore_dependency(
 
         if let Some(deps) = pom.dependencies {
             for dep in deps.dependencies {
-                /*
-                if let Some(scope) = dep
-                    .scope
-                    .clone()
-                    .map(|s| s.value)
-                    .or(Some(MavenDependencyScope::Compile))
-                {
-                    if scope == MavenDependencyScope::Compile
-                        || scope == MavenDependencyScope::Runtime
-                    {*/
                 println!("Should download dependency : {}", dep.dependency_notation());
                 let repo = Arc::clone(&repo);
                 let task = tokio::spawn(explore_dependency(
@@ -118,9 +108,9 @@ async fn fetch_pom(
                 .await?;
                 // Merge current pom with parent
                 pom = parent.merge(&pom);
-                if main {
-                    pom.clean();
-                }
+            }
+            if main {
+                pom.clean();
             }
             return Ok(pom);
         })

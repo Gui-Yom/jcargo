@@ -7,41 +7,7 @@ use lazy_regex::{regex, Lazy};
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
 
-/// Xml element with only a string body
-#[derive(Clone, PartialEq, Default, Deserialize, Serialize)]
-pub struct Element {
-    #[serde(rename = "$value")]
-    pub value: String,
-}
-
-impl Element {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self {
-            value: value.into(),
-        }
-    }
-}
-
-impl<S> From<S> for Element
-where
-    S: Into<String>,
-{
-    fn from(s: S) -> Self {
-        Element::new(s)
-    }
-}
-
-impl Display for Element {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-
-impl Debug for Element {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
+use crate::dependencies::xml_utils::Elem;
 
 pub type Properties = HashMap<String, String>;
 
@@ -87,14 +53,14 @@ impl PropertiesExt for Properties {
 #[serde(rename = "project")]
 pub struct MavenPom {
     #[serde(rename = "modelVersion")]
-    pub model_version: Element,
+    pub model_version: Elem<String>,
     /// If none, then derived from parent
     #[serde(rename = "groupId")]
-    pub group_id: Option<Element>,
+    pub group_id: Option<Elem<String>>,
     #[serde(rename = "artifactId")]
-    pub artifact_id: Element,
+    pub artifact_id: Elem<String>,
     /// If none, then derived from parent
-    pub version: Option<Element>,
+    pub version: Option<Elem<String>>,
     /// None if this is a top level pom
     pub parent: Option<ParentPom>,
     pub properties: Option<HashMap<String, String>>,
@@ -209,10 +175,10 @@ impl MavenPom {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ParentPom {
     #[serde(rename = "groupId")]
-    pub group_id: Element,
+    pub group_id: Elem<String>,
     #[serde(rename = "artifactId")]
-    pub artifact_id: Element,
-    pub version: Element,
+    pub artifact_id: Elem<String>,
+    pub version: Elem<String>,
     //#[serde(rename = "relativePath")]
     //pub relative_path: Option<Element>,
 }
@@ -263,46 +229,16 @@ impl PomDependencies {
     }
 }
 
-#[derive(Clone, PartialEq, Default, Deserialize, Serialize)]
-pub struct BoolElement {
-    #[serde(rename = "$value")]
-    pub value: bool,
-}
-
-impl BoolElement {
-    pub fn new(value: bool) -> Self {
-        Self { value }
-    }
-}
-
-impl From<bool> for BoolElement {
-    fn from(v: bool) -> Self {
-        BoolElement::new(v)
-    }
-}
-
-impl Display for BoolElement {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-
-impl Debug for BoolElement {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PomDependency {
     #[serde(rename = "groupId")]
-    pub group_id: Element,
+    pub group_id: Elem<String>,
     #[serde(rename = "artifactId")]
-    pub artifact_id: Element,
-    pub version: Option<Element>,
-    pub scope: Option<DependencyScope>,
-    pub r#type: Option<Element>,
-    pub optional: Option<BoolElement>,
+    pub artifact_id: Elem<String>,
+    pub version: Option<Elem<String>>,
+    pub scope: Option<Elem<MavenDependencyScope>>,
+    pub r#type: Option<Elem<String>>,
+    pub optional: Option<Elem<bool>>,
 }
 
 impl PomDependency {
@@ -360,24 +296,6 @@ impl PomDependency {
             //println!("dep: {}, scope: {:?}", self.dependency_notation(), scope);
             scope == MavenDependencyScope::Compile || scope == MavenDependencyScope::Runtime
         }
-    }
-}
-
-#[derive(Clone, PartialEq, Deserialize, Serialize)]
-pub struct DependencyScope {
-    #[serde(rename = "$value")]
-    pub value: MavenDependencyScope,
-}
-
-impl Display for DependencyScope {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.value)
-    }
-}
-
-impl Debug for DependencyScope {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.value)
     }
 }
 
@@ -560,7 +478,7 @@ mod tests {
         let pom = MavenPom::parse(&pom)?;
         println!("parsed pom {:#?}", pom);
 
-        pom.dependencies.map(|deps| deps.extract_deps());
+        //pom.dependencies.map(|deps| deps.extract_deps());
 
         Ok(())
     }

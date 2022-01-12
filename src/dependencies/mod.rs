@@ -8,7 +8,9 @@ use crate::Env;
 
 pub mod dependency_graph;
 pub mod maven;
+pub mod maven_metadata;
 pub mod mavenpom;
+pub mod xml_utils;
 
 #[derive(Debug, Clone)]
 pub struct Dependencies {
