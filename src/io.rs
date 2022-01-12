@@ -53,3 +53,15 @@ pub async fn download_memory_and_file(
     file.flush().await?;
     Ok(text)
 }
+
+pub async fn save_to_file(content: &str, path: impl AsRef<Path>) -> Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+        .await?;
+    file.write_all(content.as_bytes()).await?;
+    file.flush().await?;
+    Ok(())
+}

@@ -34,10 +34,8 @@ impl MavenMetadata {
 }
 
 mod tests {
-    use anyhow::Result;
-
     use crate::dependencies::maven_metadata::{MavenMetadata, Versioning, Versions};
-    use crate::dependencies::xml_utils::Elem;
+    use anyhow::Result;
 
     #[test]
     fn test_ser() {

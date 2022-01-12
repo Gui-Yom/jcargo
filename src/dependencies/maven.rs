@@ -1,15 +1,16 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
 use reqwest::Client;
+use tokio::fs;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::dependencies::dependency_graph::DependencyGraph;
-use crate::dependencies::mavenpom::{MavenDependencyScope, MavenPom};
+use crate::dependencies::mavenpom::MavenPom;
 use crate::dependencies::MavenRepoDependency;
-use crate::download::download_memory;
+use crate::io::{download_memory, save_to_file};
 
 /*
 We have a dependency graph
@@ -29,33 +30,29 @@ pub async fn explore_dependency(
     root: MavenRepoDependency,
     sub_tasks: UnboundedSender<JoinHandle<Result<()>>>,
 ) -> Result<()> {
-    let file_path = base_dir.join(&root.pom_name());
+    println!("Exploring main node '{}'", root);
 
-    if !file_path.exists() {
-        println!("Exploring main node '{}'", root);
+    let repo = Arc::clone(&root.repo);
+    let pom = fetch_pom(graph.clone(), client.clone(), &base_dir, root).await?;
+    //println!("Downloaded pom : {:#?}", pom);
 
-        let repo = Arc::clone(&root.repo);
-        let mut pom = fetch_pom(graph.clone(), client.clone(), root, true).await?;
-        //println!("Downloaded pom : {:#?}", pom);
-
-        if let Some(deps) = pom.dependencies {
-            for dep in deps.dependencies {
-                println!("Should download dependency : {}", dep.dependency_notation());
-                let repo = Arc::clone(&repo);
-                let task = tokio::spawn(explore_dependency(
-                    client.clone(),
-                    graph.clone(),
-                    base_dir.clone(),
-                    MavenRepoDependency {
-                        group: dep.group_id.value,
-                        artifact: dep.artifact_id.value,
-                        version: dep.version.unwrap().value,
-                        repo,
-                    },
-                    sub_tasks.clone(),
-                ));
-                sub_tasks.send(task);
-            }
+    if let Some(deps) = pom.dependencies {
+        for dep in deps.dependencies {
+            //println!("Should download dependency : {}", dep.dependency_notation());
+            let repo = Arc::clone(&repo);
+            let task = tokio::spawn(explore_dependency(
+                client.clone(),
+                graph.clone(),
+                base_dir.clone(),
+                MavenRepoDependency {
+                    group: dep.group_id.value,
+                    artifact: dep.artifact_id.value,
+                    version: dep.version.unwrap().value,
+                    repo,
+                },
+                sub_tasks.clone(),
+            ));
+            sub_tasks.send(task)?;
         }
     }
 
@@ -75,26 +72,62 @@ pub async fn explore_dependency(
 }
 
 /// The returned pom will have all its parents merged.
-#[async_recursion::async_recursion]
 async fn fetch_pom(
     graph: DependencyGraph,
     client: Client,
+    dir: &Path,
     dep: MavenRepoDependency,
-    main: bool,
 ) -> Result<MavenPom> {
     let key = dep.dependency_notation();
     let graph_ = graph.clone();
     graph
-        .get_or_init(&key, async move {
-            println!(
-                "Running in {} node '{}': downloading pom",
-                if main { "main" } else { "parent" },
-                dep.dependency_notation()
-            );
+        .get_or_init(&key, async {
+            let file = dir.join(dep.pom_name());
+
+            Ok(if file.exists() {
+                println!("Running in main node '{}': fetching pom (cache hit)", &key);
+                MavenPom::parse(&fs::read_to_string(&file).await?).unwrap()
+            } else {
+                println!("Running in main node '{}': fetching pom", &key);
+                let mut pom = MavenPom::parse(&download_memory(&client, dep.pom_url()).await?)?;
+                if let Some(parent) = pom.parent.clone() {
+                    // Recurse to download and merge parent pom hierarchy
+                    let parent = fetch_parent_pom(
+                        graph_,
+                        client,
+                        MavenRepoDependency {
+                            group: parent.group_id.value,
+                            artifact: parent.artifact_id.value,
+                            version: parent.version.value,
+                            repo: Arc::clone(&dep.repo),
+                        },
+                    )
+                    .await?;
+                    // Merge current pom with parent
+                    pom = parent.merge(&pom);
+                }
+                pom.clean();
+                save_to_file(&pom.save()?, &file).await?;
+                pom
+            })
+        })
+        .await
+}
+
+#[async_recursion::async_recursion]
+async fn fetch_parent_pom(
+    graph: DependencyGraph,
+    client: Client,
+    dep: MavenRepoDependency,
+) -> Result<MavenPom> {
+    let key = dep.dependency_notation();
+    let graph_ = graph.clone();
+    graph
+        .get_or_init(&key, async {
+            println!("Running in parent node '{}': fetching pom", &key);
             let mut pom = MavenPom::parse(&download_memory(&client, dep.pom_url()).await?)?;
             if let Some(parent) = pom.parent.clone() {
-                // Recurse to fetch parent pom
-                let parent = fetch_pom(
+                let parent = fetch_parent_pom(
                     graph_,
                     client,
                     MavenRepoDependency {
@@ -103,16 +136,12 @@ async fn fetch_pom(
                         version: parent.version.value,
                         repo: Arc::clone(&dep.repo),
                     },
-                    false,
                 )
                 .await?;
                 // Merge current pom with parent
                 pom = parent.merge(&pom);
             }
-            if main {
-                pom.clean();
-            }
-            return Ok(pom);
+            Ok(pom)
         })
         .await
 }

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 
 use anyhow::Result;
 use lazy_regex::{regex, Lazy};
@@ -9,49 +9,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::dependencies::xml_utils::Elem;
 
-pub type Properties = HashMap<String, String>;
-
-pub trait PropertiesExt {
-    /// Recursively resolve properties in the given text
-    fn recurse_resolve<'t>(&self, text: &'t str, project_version: &str) -> Cow<'t, str>;
-
-    fn merge(&self, other: &Properties) -> Properties;
-}
-
-impl PropertiesExt for Properties {
-    fn recurse_resolve<'t>(&self, text: &'t str, project_version: &str) -> Cow<'t, str> {
-        // Regex is compiled at compile time
-        let pat: &Lazy<Regex> = regex!("\\$\\{(?P<prop_name>.+)\\}");
-        pat.replace_all(text, |caps: &Captures| {
-            let prop = caps.name("prop_name").unwrap().as_str();
-
-            // project.version is defined by maven
-            if prop == "project.version" {
-                return Cow::Borrowed(project_version);
-            }
-
-            let res = self.get(prop);
-            if res.is_none() {
-                println!("Can't resolve {}", text);
-                return Cow::Borrowed(text);
-            } else {
-                return self.recurse_resolve(res.unwrap(), project_version);
-            }
-        })
-    }
-
-    fn merge(&self, other: &Properties) -> Properties {
-        let mut new = self.clone();
-        for (k, v) in other.iter() {
-            new.insert(k.clone(), v.clone());
-        }
-        new
-    }
-}
+const SCHEMA_XSD: &str =
+    "http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd";
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename = "project")]
 pub struct MavenPom {
+    #[serde(rename = "xsi:schemaLocation")]
+    schema_location: String,
     #[serde(rename = "modelVersion")]
     pub model_version: Elem<String>,
     /// If none, then derived from parent
@@ -69,6 +34,52 @@ pub struct MavenPom {
     pub dependency_management: Option<DependencyManagement>,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ParentPom {
+    #[serde(rename = "groupId")]
+    pub group_id: Elem<String>,
+    #[serde(rename = "artifactId")]
+    pub artifact_id: Elem<String>,
+    pub version: Elem<String>,
+    //#[serde(rename = "relativePath")]
+    //pub relative_path: Option<Element>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct PomDependencies {
+    #[serde(rename = "dependency")]
+    pub dependencies: Vec<PomDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct PomDependency {
+    #[serde(rename = "groupId")]
+    pub group_id: Elem<String>,
+    #[serde(rename = "artifactId")]
+    pub artifact_id: Elem<String>,
+    pub version: Option<Elem<String>>,
+    pub scope: Option<Elem<MavenDependencyScope>>,
+    pub r#type: Option<Elem<String>>,
+    pub optional: Option<Elem<bool>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub enum MavenDependencyScope {
+    #[serde(rename = "compile")]
+    Compile,
+    #[serde(rename = "runtime")]
+    Runtime,
+    #[serde(rename = "test")]
+    Test,
+    #[serde(rename = "provided")]
+    Provided,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct DependencyManagement {
+    pub dependencies: PomDependencies,
+}
+
 impl MavenPom {
     pub fn parse(text: &str) -> Result<Self> {
         let mut pom: Self = quick_xml::de::from_str(text)?;
@@ -79,6 +90,10 @@ impl MavenPom {
             pom.version = Some(pom.parent.as_ref().unwrap().version.clone());
         }
         Ok(pom)
+    }
+
+    pub fn save(&self) -> Result<String> {
+        Ok(quick_xml::se::to_string(self)?)
     }
 
     pub fn dependency_notation(&self) -> String {
@@ -135,6 +150,7 @@ impl MavenPom {
         };
 
         MavenPom {
+            schema_location: SCHEMA_XSD.to_string(),
             model_version: "4.0.0".into(),
             group_id: new.group_id.clone().or(self.group_id.clone()),
             artifact_id: new.artifact_id.clone(),
@@ -167,20 +183,16 @@ impl MavenPom {
                 }
             }
         }
+        if self
+            .dependencies
+            .as_ref()
+            .map_or(true, |d| d.dependencies.is_empty())
+        {
+            self.dependencies = None;
+        }
         self.properties = None;
         self.dependency_management = None;
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct ParentPom {
-    #[serde(rename = "groupId")]
-    pub group_id: Elem<String>,
-    #[serde(rename = "artifactId")]
-    pub artifact_id: Elem<String>,
-    pub version: Elem<String>,
-    //#[serde(rename = "relativePath")]
-    //pub relative_path: Option<Element>,
 }
 
 impl ParentPom {
@@ -192,27 +204,20 @@ impl ParentPom {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct PomDependencies {
-    #[serde(rename = "dependency")]
-    pub dependencies: Vec<PomDependency>,
-}
-
 impl PomDependencies {
     /// Merge pdeps with cdeps
     pub fn merge(&self, new: &PomDependencies) -> PomDependencies {
         let mut dependencies = self.clone();
-        for newDep in &new.dependencies {
-            let candidate = dependencies
-                .dependencies
-                .iter_mut()
-                .find(|it| it.group_id == newDep.group_id && it.artifact_id == newDep.artifact_id);
+        for new_dep in &new.dependencies {
+            let candidate = dependencies.dependencies.iter_mut().find(|it| {
+                it.group_id == new_dep.group_id && it.artifact_id == new_dep.artifact_id
+            });
             // Dependency was already included, we just update it
             if let Some(curr) = candidate {
-                *curr = curr.merge(newDep);
+                *curr = curr.merge(new_dep);
             } else {
                 // New dependency
-                dependencies.dependencies.push(newDep.clone());
+                dependencies.dependencies.push(new_dep.clone());
             }
         }
         dependencies
@@ -227,18 +232,6 @@ impl PomDependencies {
     pub fn clean(&mut self) {
         self.dependencies.retain(|dep| dep.should_keep());
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct PomDependency {
-    #[serde(rename = "groupId")]
-    pub group_id: Elem<String>,
-    #[serde(rename = "artifactId")]
-    pub artifact_id: Elem<String>,
-    pub version: Option<Elem<String>>,
-    pub scope: Option<Elem<MavenDependencyScope>>,
-    pub r#type: Option<Elem<String>>,
-    pub optional: Option<Elem<bool>>,
 }
 
 impl PomDependency {
@@ -299,28 +292,51 @@ impl PomDependency {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
-pub enum MavenDependencyScope {
-    #[serde(rename = "compile")]
-    Compile,
-    #[serde(rename = "runtime")]
-    Runtime,
-    #[serde(rename = "test")]
-    Test,
-    #[serde(rename = "provided")]
-    Provided,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct DependencyManagement {
-    pub dependencies: PomDependencies,
-}
-
 impl DependencyManagement {
     fn merge(&self, new: &DependencyManagement) -> DependencyManagement {
         DependencyManagement {
             dependencies: self.dependencies.merge(&new.dependencies),
         }
+    }
+}
+
+pub type Properties = HashMap<String, String>;
+
+pub trait PropertiesExt {
+    /// Recursively resolve properties in the given text
+    fn recurse_resolve<'t>(&self, text: &'t str, project_version: &str) -> Cow<'t, str>;
+
+    fn merge(&self, other: &Properties) -> Properties;
+}
+
+impl PropertiesExt for Properties {
+    fn recurse_resolve<'t>(&self, text: &'t str, project_version: &str) -> Cow<'t, str> {
+        // Regex is compiled at compile time
+        let pat: &Lazy<Regex> = regex!("\\$\\{(?P<prop_name>.+)\\}");
+        pat.replace_all(text, |caps: &Captures| {
+            let prop = caps.name("prop_name").unwrap().as_str();
+
+            // project.version is defined by maven
+            if prop == "project.version" {
+                return Cow::Borrowed(project_version);
+            }
+
+            let res = self.get(prop);
+            if res.is_none() {
+                println!("Can't resolve {}", text);
+                return Cow::Borrowed(text);
+            } else {
+                return self.recurse_resolve(res.unwrap(), project_version);
+            }
+        })
+    }
+
+    fn merge(&self, other: &Properties) -> Properties {
+        let mut new = self.clone();
+        for (k, v) in other.iter() {
+            new.insert(k.clone(), v.clone());
+        }
+        new
     }
 }
 
@@ -330,7 +346,7 @@ mod tests {
     use reqwest::Client;
 
     use crate::dependencies::mavenpom::{
-        MavenPom, ParentPom, PomDependencies, PomDependency, Properties, PropertiesExt,
+        MavenPom, ParentPom, PomDependencies, PomDependency, Properties, PropertiesExt, SCHEMA_XSD,
     };
 
     #[test]
@@ -338,6 +354,7 @@ mod tests {
         println!(
             "{}",
             quick_xml::se::to_string(&MavenPom {
+                schema_location: SCHEMA_XSD.to_string(),
                 model_version: "4.0.0".into(),
                 group_id: None,
                 artifact_id: "jcargo-bin".into(),
@@ -466,20 +483,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve() -> Result<()> {
-        let client = Client::new();
+    async fn test_clean() -> Result<()> {
+        let mut pom = MavenPom::parse(&pom_source_0().await?)?;
+        pom.clean();
+        println!("{:#?}", pom);
+        Ok(())
+    }
 
-        let pom = client
-            .get("https://repo.maven.apache.org/maven2/com/graphql-java/graphql-java/17.3/graphql-java-17.3.pom")
-            .send()
-            .await?
-            .text()
-            .await?;
-        let pom = MavenPom::parse(&pom)?;
-        println!("parsed pom {:#?}", pom);
+    #[tokio::test]
+    async fn test_ser_deser() -> Result<()> {
+        let mut pom = MavenPom::parse(&pom_source_0().await?)?;
+        pom.clean();
+        let pom = MavenPom::parse(&pom.save()?)?;
+        println!("pom: {:#?}", pom);
+        Ok(())
+    }
 
-        //pom.dependencies.map(|deps| deps.extract_deps());
-
+    #[test]
+    fn test_deser() -> Result<()> {
+        let text = r#"<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd"><modelVersion>4.0.0</modelVersion><groupId>org.apache.logging.log4j</groupId><artifactId>log4j-api</artifactId><version>2.17.1</version></project>"#;
+        let pom = MavenPom::parse(&text)?;
         Ok(())
     }
 }

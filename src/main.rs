@@ -11,7 +11,7 @@ use crate::tasks::execute_task;
 
 mod backend;
 mod dependencies;
-mod download;
+mod io;
 mod javac_parser;
 mod manifest;
 mod module;
