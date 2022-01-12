@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use crate::dependencies::dependency_graph::DependencyGraph;
 use crate::dependencies::mavenpom::MavenPom;
 use crate::dependencies::MavenRepoDependency;
-use crate::io::{download_memory, save_to_file};
+use crate::io::{download_file, download_memory, save_to_file};
 
 /*
 We have a dependency graph
@@ -33,8 +33,20 @@ pub async fn explore_dependency(
     println!("Exploring main node '{}'", root);
 
     let repo = Arc::clone(&root.repo);
-    let pom = fetch_pom(graph.clone(), client.clone(), &base_dir, root).await?;
+    let pom = fetch_pom(graph.clone(), client.clone(), &base_dir, root.clone()).await?;
     //println!("Downloaded pom : {:#?}", pom);
+
+    let jar_file = base_dir.join(root.jar_name());
+    if !jar_file.exists() {
+        println!(
+            "Downloading artifacts for '{}' (jar) from {}",
+            root.dependency_notation(),
+            &repo.name
+        );
+        download_file(&client, root.jar_url(), &jar_file).await?;
+    } else {
+        println!("Dependency '{}' OK", root.dependency_notation());
+    }
 
     if let Some(deps) = pom.dependencies {
         for dep in deps.dependencies {
@@ -55,19 +67,6 @@ pub async fn explore_dependency(
             sub_tasks.send(task)?;
         }
     }
-
-    /*
-    let file_path = dir.join(&repodep.get_jar_name());
-
-    if !file_path.exists() {
-        println!("Downloading '{}' (jar) from {}", repodep, repodep.repo.name);
-
-        let url = repodep.jar_url();
-        //dbg!(&url);
-        download_file(&client, url, &file_path).await.unwrap();
-    }
-
-    println!("Dependency '{}' OK", repodep);*/
     Ok(())
 }
 
