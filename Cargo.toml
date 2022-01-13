@@ -1,11 +1,11 @@
 [package]
 name = "jcargo"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 include = ["src/**/*", "LICENSE", "README.md"]
 authors = ["Guillaume Anthouard <25181283+Gui-Yom@users.noreply.github.com>"]
 rust-version = "1.56"
-description = "Trying to remake Rust's excellent build tool for the JVM ecosystem."
+description = "An attempt at making an equivalent to Rust's excellent build tool for the JVM ecosystem."
 repository = "https://github.com/Gui-Yom/jcargo/"
 homepage = "https://github.com/Gui-Yom/jcargo/"
 license = "MIT OR Apache-2.0"

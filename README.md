@@ -117,8 +117,8 @@ Read [some of the designs](DESIGN.md) of jcargo.
         - [ ] Custom binary repositories
         - [ ] Git dependencies (project made with jcargo)
         - [ ] Local dependency (project made with jcargo)
-        - [ ] Dependency caching
-            * [ ] Cache pom and jar
+        - [x] Dependency caching
+            * [x] Cache pom and jar
             * [ ] Cache maven metadata
             * [ ] Cache dependency graph resolution
             * [ ] Verify file hashes

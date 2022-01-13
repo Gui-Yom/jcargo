@@ -7,11 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+[Unreleased]: https://github.com/Gui-Yom/jcargo/compare/v0.2.0...HEAD
+
+## [0.2.0] - 2022-01-13
+
 ### Added
 
 - Resolve entire dependency graph correctly
 
-[Unreleased]: https://github.com/Gui-Yom/jcargo/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/Gui-Yom/jcargo/releases/tag/v0.2.0
 
 ## [0.1.0] - 2021-11-23
 
