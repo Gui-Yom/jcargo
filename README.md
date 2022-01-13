@@ -52,6 +52,11 @@ cargo install --path .
 For now, `JDK_HOME/bin` must be in your path for jcargo to find the jdk tools. If you want to
 compile kotlin sources, set `KOTLINC_HOME` to point to the installation directory of kotlinc.
 
+### Using native-jdktools
+
+If using native-jdktools, please set `NATIVE_JDKTOOLS` to point to the native-jdktools executable.
+Please also set `JDKTOOLS_HOME` to a jdk home directory.
+
 ## Configuration
 
 Configuration is definitely not frozen. I particularly don't like how dependencies are specified.

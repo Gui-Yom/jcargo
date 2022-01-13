@@ -239,7 +239,7 @@ pub async fn build(module: &Module, backend: JavaCompilationBackend) {
             .await
             .unwrap();
 
-        println!("Compiled kotlin sources.");
+        println!("Compiled java sources.");
     }
 }
 

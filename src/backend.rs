@@ -4,6 +4,18 @@ use std::str::FromStr;
 
 use tokio::process;
 
+fn native_jdktools_path() -> String {
+    env::var("NATIVE_JDK").expect("NATIVE_JDK needs to point to the native-jdktools executable")
+}
+
+fn kotlinc_path() -> String {
+    format!(
+        "{}/bin/kotlinc",
+        env::var("KOTLINC_HOME")
+            .expect("KOTLINC_HOME expected to be set to where kotlinc is installed.")
+    )
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum JavaCompilationBackend {
     JdkJavac,
@@ -27,11 +39,8 @@ impl JavaCompilationBackend {
         match self {
             JavaCompilationBackend::JdkJavac => process::Command::new("javac"),
             JavaCompilationBackend::NativeJavac => {
-                let mut cmd = process::Command::new("native-jdktools");
-                cmd.arg("javac").env(
-                    "JDKTOOLS_HOME",
-                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-                );
+                let mut cmd = process::Command::new(native_jdktools_path());
+                cmd.arg("javac");
                 cmd
             }
         }
@@ -47,12 +56,7 @@ impl KotlinCompilationBackend {
     pub fn command(&self) -> process::Command {
         match self {
             KotlinCompilationBackend::Kotlinc => {
-                let path = PathBuf::from(
-                    env::var("KOTLINC_HOME")
-                        .expect("KOTLINC_HOME expected to be set to where kotlinc is installed."),
-                );
-                let mut cmd = process::Command::new("cmd");
-                cmd.arg("/C").arg(path.join("bin/kotlinc"));
+                let mut cmd = process::Command::new(kotlinc_path());
                 cmd
             }
         }
@@ -86,11 +90,8 @@ impl DocumentationBackend {
                 cmd
             }
             DocumentationBackend::NativeJavadoc => {
-                let mut cmd = process::Command::new("native-jdktools");
-                cmd.arg("javadoc").env(
-                    "JDKTOOLS_HOME",
-                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-                );
+                let mut cmd = process::Command::new(native_jdktools_path());
+                cmd.arg("javadoc");
                 cmd
             }
         }
@@ -111,11 +112,8 @@ impl PackageBackend {
                 cmd
             }
             PackageBackend::NativeJar => {
-                let mut cmd = process::Command::new("native-jdktools");
-                cmd.arg("jar").env(
-                    "JDKTOOLS_HOME",
-                    "C:/Program Files/Eclipse Foundation/jdk-17.0.0.35-hotspot",
-                );
+                let mut cmd = process::Command::new(native_jdktools_path());
+                cmd.arg("jar");
                 cmd
             }
         }

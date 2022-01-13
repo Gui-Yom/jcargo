@@ -22,8 +22,10 @@ mod tasks;
 struct Opts {
     #[structopt(short, long)]
     debug: bool,
+    /// Set working dir
     #[structopt(short, long = "--working-dir", default_value = ".")]
     working_dir: PathBuf,
+    /// Force using native-jdktools
     #[structopt(long)]
     native: bool,
     #[structopt(subcommand)]
